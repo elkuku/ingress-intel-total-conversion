@@ -144,10 +144,23 @@ def bundle_code(_, path=None):
         map_order = [
             'interfaces.js',           # Defines IITC.map namespace and interfaces
             'geo/geodesic-calc.js',    # Geodesic calculations (no dependencies)
+            # Leaflet adapter and layers
             'adapters/leaflet.js',     # Leaflet adapter
             'layers/leaflet/portal-marker.js',  # Portal marker
             'layers/leaflet/geodesic.js',       # Geodesic shapes wrapper
             'layers/leaflet/factory.js',        # Layer factory
+            # Mapbox adapter and layers
+            'adapters/mapbox.js',      # Mapbox adapter
+            'layers/mapbox/utils.js',           # Utility classes (LatLng, Point, etc.)
+            'layers/mapbox/portal-marker.js',   # Portal marker
+            'layers/mapbox/geodesic.js',        # Geodesic shapes
+            'layers/mapbox/shapes.js',          # Basic shapes
+            'layers/mapbox/marker.js',          # Generic markers
+            'layers/mapbox/layer-group.js',     # Layer groups
+            'layers/mapbox/tile-layer.js',      # Tile layers
+            'layers/mapbox/popup.js',           # Popups and tooltips
+            'layers/mapbox/factory.js',         # Layer factory
+            # Compatibility and facade
             'compat/window-map-shim.js',        # Compatibility shim
             'index.js',                # Main facade (depends on all above)
         ]
