@@ -16,6 +16,18 @@
 IITC.map = IITC.map || {};
 
 /**
+ * @namespace IITC.map.adapters
+ * @description Map renderer adapters for different mapping libraries.
+ */
+IITC.map.adapters = IITC.map.adapters || {};
+
+/**
+ * @namespace IITC.map.layers
+ * @description Layer implementations for different renderers.
+ */
+IITC.map.layers = IITC.map.layers || {};
+
+/**
  * Interface definition for map renderers.
  * All map adapters (Leaflet, Mapbox, etc.) must implement these methods.
  *

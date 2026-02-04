@@ -258,26 +258,43 @@ window.mapOptions = {
  * @function setupMap
  */
 window.setupMap = function () {
-  setupCRS();
-
   $('#map').text(''); // clear 'Loading, please wait'
 
-  // Build map options, merging defaults with user options
-  var mapOptions = L.extend(
-    {
-      // proper initial position is now delayed until all plugins are loaded and the base layer is set
-      center: [0, 0],
-      zoom: 1,
-      crs: L.CRS.S2,
-      minZoom: window.MIN_ZOOM,
-      // zoomAnimation: false,
-      markerZoomAnimation: false,
-      bounceAtZoomLimits: false,
-      maxBoundsViscosity: 0.7,
-      worldCopyJump: true,
-    },
-    window.mapOptions
-  );
+  // Determine renderer type early (from mapRendererConfig set by renderer_settings.js)
+  var rendererType = window.mapRendererConfig?.renderer || 'leaflet';
+
+  // Build map options based on renderer type
+  var mapOptions;
+  if (rendererType === 'leaflet') {
+    // Leaflet-specific setup
+    setupCRS();
+
+    mapOptions = L.extend(
+      {
+        // proper initial position is now delayed until all plugins are loaded and the base layer is set
+        center: [0, 0],
+        zoom: 1,
+        crs: L.CRS.S2,
+        minZoom: window.MIN_ZOOM,
+        // zoomAnimation: false,
+        markerZoomAnimation: false,
+        bounceAtZoomLimits: false,
+        maxBoundsViscosity: 0.7,
+        worldCopyJump: true,
+      },
+      window.mapOptions
+    );
+  } else {
+    // Mapbox-specific options
+    mapOptions = Object.assign(
+      {
+        center: [0, 0],
+        zoom: 1,
+        minZoom: window.MIN_ZOOM,
+      },
+      window.mapOptions
+    );
+  }
 
   // Initialize the map through the IITC.map facade
   // This allows for future renderer switching (Leaflet, Mapbox, etc.)
@@ -286,111 +303,153 @@ window.setupMap = function () {
   // Get the native map instance for backward compatibility
   // All existing code and plugins expect window.map to be an L.map
   var map = adapter.getNativeMap();
+  if (rendererType === 'leaflet') {
+    var max_lat = map.options.crs.projection.MAX_LATITUDE;
+    map.setMaxBounds([
+      [max_lat, 360],
+      [-max_lat, -360],
+    ]);
 
-  var max_lat = map.options.crs.projection.MAX_LATITUDE;
-  map.setMaxBounds([
-    [max_lat, 360],
-    [-max_lat, -360],
-  ]);
-
-  L.Renderer.mergeOptions({
-    padding: window.RENDERER_PADDING || 0.5,
-  });
-
-  // add empty div to leaflet control areas - to force other leaflet controls to move around IITC UI elements
-  // TODO? move the actual IITC DOM into the leaflet control areas, so dummy <div>s aren't needed
-  if (!window.isSmartphone()) {
-    // chat window area
-    $('<div>')
-      .addClass('leaflet-control')
-      .width(708)
-      .height(108)
-      .css({
-        'pointer-events': 'none',
-        margin: '0',
-      })
-      .appendTo(map._controlCorners.bottomleft);
-  }
-  var baseLayers = createDefaultBaseMapLayers();
-  var overlays = createDefaultOverlays();
-
-  var layerChooser = (window.layerChooser = new window.LayerChooser(baseLayers, overlays, { map: map }).addTo(map));
-
-  $.each(overlays, function (_, layer) {
-    if (map.hasLayer(layer)) {
-      return true;
-    } // continue
-
-    // as users often become confused if they accidentally switch a standard layer off, display a warning in this case
-    $('#portaldetails').html(
-      '<div class="layer_off_warning">' +
-        '<p><b>Warning</b>: some of the standard layers are turned off. Some portals/links/fields will not be visible.</p>' +
-        '<a id="enable_standard_layers">Enable standard layers</a>' +
-        '</div>'
-    );
-    $('#enable_standard_layers').on('click', function () {
-      $.each(overlays, function (ind, overlay) {
-        if (!map.hasLayer(overlay)) {
-          map.addLayer(overlay);
-        }
-      });
-      $('#portaldetails').html('');
+    L.Renderer.mergeOptions({
+      padding: window.RENDERER_PADDING || 0.5,
     });
-    return false; // break
-  });
 
-  map.attributionControl.setPrefix('');
+    // add empty div to leaflet control areas - to force other leaflet controls to move around IITC UI elements
+    // TODO? move the actual IITC DOM into the leaflet control areas, so dummy <div>s aren't needed
+    if (!window.isSmartphone()) {
+      // chat window area
+      $('<div>')
+        .addClass('leaflet-control')
+        .width(708)
+        .height(108)
+        .css({
+          'pointer-events': 'none',
+          margin: '0',
+        })
+        .appendTo(map._controlCorners.bottomleft);
+    }
+  } else if (rendererType === 'mapbox') {
+    // Mapbox uses different approach for max bounds
+    // Web Mercator max latitude is approximately 85.051129
+    var max_lat_mapbox = 85.051129;
+    map.setMaxBounds([
+      [-360, -max_lat_mapbox], // [west, south]
+      [360, max_lat_mapbox],   // [east, north]
+    ]);
+  }
 
-  /**
-   * Override default Google Maps attribution to use Leaflet's native attribution control
-   * instead of creating separate DOM elements. Extracts text content from Google's
-   * attribution container and adds it to Leaflet's control.
-   */
-  L.GridLayer.GoogleMutant.prototype._setupAttribution = function (ev) {
-    if (!this._map?.attributionControl) {
-      return;
-    }
-    // eslint-disable-next-line
-    const pos = google.maps.ControlPosition;
-    const container = ev.positions.get(pos.BOTTOM_RIGHT);
-    const attribution = container?.querySelector('span')?.textContent;
-    if (attribution) {
-      this._attributionText = attribution;
-      this._map.attributionControl.addAttribution(attribution);
-    }
-  };
-  const originalGoogleMutantOnRemove = L.GridLayer.GoogleMutant.prototype.onRemove;
-  L.GridLayer.GoogleMutant.prototype.onRemove = function (map) {
-    originalGoogleMutantOnRemove.call(this, map);
-    if (this._attributionText && map.attributionControl) {
-      map.attributionControl.removeAttribution(this._attributionText);
-    }
-  };
+  // Base layers and layer chooser are currently Leaflet-specific
+  var baseLayers = {};
+  var overlays = {};
+  var layerChooser;
+
+  if (rendererType === 'leaflet') {
+    baseLayers = createDefaultBaseMapLayers();
+    overlays = createDefaultOverlays();
+
+    layerChooser = (window.layerChooser = new window.LayerChooser(baseLayers, overlays, { map: map }).addTo(map));
+
+    $.each(overlays, function (_, layer) {
+      if (map.hasLayer(layer)) {
+        return true;
+      } // continue
+
+      // as users often become confused if they accidentally switch a standard layer off, display a warning in this case
+      $('#portaldetails').html(
+        '<div class="layer_off_warning">' +
+          '<p><b>Warning</b>: some of the standard layers are turned off. Some portals/links/fields will not be visible.</p>' +
+          '<a id="enable_standard_layers">Enable standard layers</a>' +
+          '</div>'
+      );
+      $('#enable_standard_layers').on('click', function () {
+        $.each(overlays, function (ind, overlay) {
+          if (!map.hasLayer(overlay)) {
+            map.addLayer(overlay);
+          }
+        });
+        $('#portaldetails').html('');
+      });
+      return false; // break
+    });
+  } else if (rendererType === 'mapbox') {
+    // TODO: Implement Mapbox-specific layer management
+    // For now, Mapbox uses the style set during initialization
+    // Create empty layer chooser to avoid errors
+    window.layerChooser = {
+      addBaseLayer: function() {},
+      addOverlay: function() {},
+      removeLayer: function() {},
+      getLayer: function() { return null; },
+      lastBaseLayerName: null
+    };
+  }
+
+  // Leaflet-specific attribution and Google Mutant setup
+  if (rendererType === 'leaflet') {
+    map.attributionControl.setPrefix('');
+
+    /**
+     * Override default Google Maps attribution to use Leaflet's native attribution control
+     * instead of creating separate DOM elements. Extracts text content from Google's
+     * attribution container and adds it to Leaflet's control.
+     */
+    L.GridLayer.GoogleMutant.prototype._setupAttribution = function (ev) {
+      if (!this._map?.attributionControl) {
+        return;
+      }
+      // eslint-disable-next-line
+      const pos = google.maps.ControlPosition;
+      const container = ev.positions.get(pos.BOTTOM_RIGHT);
+      const attribution = container?.querySelector('span')?.textContent;
+      if (attribution) {
+        this._attributionText = attribution;
+        this._map.attributionControl.addAttribution(attribution);
+      }
+    };
+    const originalGoogleMutantOnRemove = L.GridLayer.GoogleMutant.prototype.onRemove;
+    L.GridLayer.GoogleMutant.prototype.onRemove = function (map) {
+      originalGoogleMutantOnRemove.call(this, map);
+      if (this._attributionText && map.attributionControl) {
+        map.attributionControl.removeAttribution(this._attributionText);
+      }
+    };
+  }
 
   // Set window.map for backward compatibility
   // Uses the compatibility wrapper which adds IITC-specific methods
   window.map = IITC.map.getCompatProxy();
 
-  map.on('moveend', function () {
-    var center = this.getCenter().wrap();
+  // Helper function to get wrapped center coordinates (works across renderers)
+  function getWrappedCenter() {
+    var center = IITC.map.getCenter();
+    // Wrap longitude to [-180, 180]
+    var lng = center.lng;
+    while (lng > 180) lng -= 360;
+    while (lng < -180) lng += 360;
+    return { lat: center.lat, lng: lng };
+  }
+
+  // Use the adapter for event handling to ensure cross-renderer compatibility
+  adapter.on('moveend', function () {
+    var center = getWrappedCenter();
     window.writeCookie('ingress.intelmap.lat', center.lat);
     window.writeCookie('ingress.intelmap.lng', center.lng);
-    window.writeCookie('ingress.intelmap.zoom', this.getZoom());
+    window.writeCookie('ingress.intelmap.zoom', IITC.map.getZoom());
   });
 
   // map update status handling & update map hooks
   // ensures order of calls
-  map.on('movestart', function () {
+  adapter.on('movestart', function () {
     window.requests.abort();
     window.startRefreshTimeout(-1);
   });
-  map.on('moveend', function () {
+  adapter.on('moveend', function () {
     window.startRefreshTimeout(window.ON_MOVE_REFRESH * 1000);
   });
 
   // set a 'moveend' handler for the map to clear idle state. e.g. after mobile 'my location' is used.
   // possibly some cases when resizing desktop browser too
-  map.on('moveend', window.idleReset);
+  adapter.on('moveend', window.idleReset);
 
   window.addResumeFunction(function () {
     window.startRefreshTimeout(window.ON_MOVE_REFRESH * 1000);
@@ -408,16 +467,31 @@ window.setupMap = function () {
   // adds a base layer to the map. done separately from the above,
   // so that plugins that add base layers can be the default
   window.addHook('iitcLoaded', function () {
-    var stored = layerChooser.getLayer(layerChooser.lastBaseLayerName);
-    map.addLayer(stored || baseLayers['CartoDB Dark Matter']);
-
-    // (setting an initial position, before a base layer is added, causes issues with leaflet) // todo check
+    // Set initial position
     var pos = getPosition();
     if (!pos) {
       pos = { center: [0, 0], zoom: 1 };
-      map.locate({ setView: true });
     }
-    map.setView(pos.center, pos.zoom, { reset: true });
+
+    if (rendererType === 'leaflet') {
+      var stored = layerChooser.getLayer(layerChooser.lastBaseLayerName);
+      map.addLayer(stored || baseLayers['CartoDB Dark Matter']);
+
+      // (setting an initial position, before a base layer is added, causes issues with leaflet) // todo check
+      if (!getPosition()) {
+        map.locate({ setView: true });
+      }
+      map.setView(pos.center, pos.zoom, { reset: true });
+
+      // leaflet no longer ensures the base layer zoom is suitable for the map (a bug? feature change?), so do so here
+      map.on('baselayerchange', function () {
+        map.setZoom(map.getZoom());
+      });
+    } else if (rendererType === 'mapbox') {
+      // Mapbox already has a base style set during initialization
+      // Just set the view position
+      adapter.setView(pos.center, pos.zoom);
+    }
 
     // read here ONCE, so the URL is only evaluated one time after the
     // necessary data has been loaded.
@@ -427,12 +501,6 @@ window.setupMap = function () {
       window.urlPortalLL = normLL(pll[0], pll[1]).center;
     }
     window.urlPortal = window.getURLParam('pguid');
-
-    // todo check
-    // leaflet no longer ensures the base layer zoom is suitable for the map (a bug? feature change?), so do so here
-    map.on('baselayerchange', function () {
-      map.setZoom(map.getZoom());
-    });
   });
 
   /* !!This block is commented out as it's unlikely that we still need this workaround in leaflet 1+

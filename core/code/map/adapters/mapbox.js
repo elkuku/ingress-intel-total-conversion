@@ -1,10 +1,18 @@
-/* global IITC, mapboxgl, log -- eslint */
+/* global IITC, log -- eslint */
 
 /**
  * @file Mapbox GL JS adapter implementing the IMapRenderer interface.
  * Wraps mapboxgl.Map to provide the common IITC map interface.
  * @module map/adapters/mapbox
  */
+
+// Ensure mapboxgl reference works even if not in global scope
+var mapboxgl = window.mapboxgl;
+
+console.log('[IITC Debug] Mapbox adapter file starting execution');
+console.log('[IITC Debug] IITC.map.adapters exists:', !!IITC.map.adapters);
+console.log('[IITC Debug] mapboxgl defined:', typeof mapboxgl !== 'undefined');
+console.log('[IITC Debug] window.mapboxgl:', typeof window.mapboxgl);
 
 IITC.map.adapters = IITC.map.adapters || {};
 
@@ -150,6 +158,19 @@ IITC.map.adapters = IITC.map.adapters || {};
       self._processPendingOperations();
     });
 
+    // Snap to integer zoom levels after zooming to match Leaflet behavior
+    this._snappingZoom = false;
+    this._map.on('zoomend', function () {
+      if (self._snappingZoom) return;
+      var currentZoom = self._map.getZoom();
+      var targetZoom = Math.round(currentZoom);
+      if (Math.abs(currentZoom - targetZoom) > 0.01) {
+        self._snappingZoom = true;
+        self._map.zoomTo(targetZoom, { duration: 0 });
+        self._snappingZoom = false;
+      }
+    });
+
     return this._map;
   };
 
@@ -158,6 +179,11 @@ IITC.map.adapters = IITC.map.adapters || {};
    * @private
    */
   MapboxAdapter.prototype._convertOptions = function (container, options) {
+    // Set access token globally (required by Mapbox GL JS)
+    if (options.accessToken) {
+      mapboxgl.accessToken = options.accessToken;
+    }
+
     var mapboxOptions = {
       container: container,
       style: options.style || 'mapbox://styles/mapbox/dark-v11',
@@ -166,6 +192,10 @@ IITC.map.adapters = IITC.map.adapters || {};
       minZoom: options.minZoom || 0,
       maxZoom: options.maxZoom || 22,
       attributionControl: true,
+      // Prevent world copies to avoid panning issues
+      renderWorldCopies: false,
+      // Use integer zoom levels like Leaflet
+      scrollZoom: true,
     };
 
     // Convert center from [lat, lng] to [lng, lat]
@@ -207,7 +237,10 @@ IITC.map.adapters = IITC.map.adapters || {};
    * @private
    */
   MapboxAdapter.prototype._whenStyleLoaded = function (operation) {
-    if (this._styleLoaded && this._map.isStyleLoaded()) {
+    // Check if style is loaded - use multiple conditions for reliability
+    var styleLoaded = this._styleLoaded || (this._map && this._map.isStyleLoaded && this._map.isStyleLoaded());
+
+    if (styleLoaded) {
       operation();
     } else {
       this._pendingOperations.push(operation);
@@ -798,9 +831,16 @@ IITC.map.adapters = IITC.map.adapters || {};
    */
   MapboxAdapter.prototype.addMapboxLayer = function (layerDef, beforeId) {
     var self = this;
+    var styleLoaded = this._styleLoaded || (this._map && this._map.isStyleLoaded && this._map.isStyleLoaded());
+    console.log('[Mapbox] addMapboxLayer:', layerDef.id, 'styleLoaded:', styleLoaded);
     this._whenStyleLoaded(function () {
       if (!self._map.getLayer(layerDef.id)) {
-        self._map.addLayer(layerDef, beforeId);
+        try {
+          self._map.addLayer(layerDef, beforeId);
+          console.log('[Mapbox] Layer added:', layerDef.id);
+        } catch (e) {
+          console.error('[Mapbox] Error adding layer:', layerDef.id, e.message);
+        }
       }
     });
   };
@@ -988,4 +1028,6 @@ IITC.map.adapters = IITC.map.adapters || {};
 
   // Export
   IITC.map.adapters.MapboxAdapter = MapboxAdapter;
+  console.log('[IITC Debug] MapboxAdapter exported successfully');
+  console.log('[IITC Debug] IITC.map.adapters.MapboxAdapter:', !!IITC.map.adapters.MapboxAdapter);
 })();

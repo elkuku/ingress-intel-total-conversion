@@ -26,18 +26,14 @@ IITC.map.layers.leaflet = IITC.map.layers.leaflet || {};
 
   /**
    * Create a portal marker.
-   * Uses window.createMarker for compatibility, which delegates to L.PortalMarker.
+   * Directly creates L.PortalMarker (window.createMarker calls this via factory).
    * @param {L.LatLng|Object} latlng - Portal location
    * @param {Object} data - Portal data
    * @returns {L.PortalMarker}
    */
   LeafletLayerFactory.prototype.createPortalMarker = function (latlng, data) {
-    // Use window.createMarker if available (defined in portal_marker.js)
-    // This ensures compatibility and allows plugins to override marker creation
-    if (typeof window.createMarker === 'function') {
-      return window.createMarker(latlng, data);
-    }
-    // Fallback to direct L.PortalMarker construction
+    // Directly create L.PortalMarker - don't call window.createMarker to avoid recursion
+    // (window.createMarker now calls factory.createPortalMarker)
     return new L.PortalMarker(latlng, data);
   };
 

@@ -69,14 +69,16 @@ window.setupDataTileParams = function () {
  * @returns {Object} An object containing tile parameters for the given zoom level.
  */
 window.getMapZoomTileParameters = function (zoom) {
+  // Floor zoom to integer for array indexing (Mapbox may return fractional zoom)
+  var zoomInt = Math.floor(zoom);
   var maxTilesPerEdge = window.TILE_PARAMS.TILES_PER_EDGE[window.TILE_PARAMS.TILES_PER_EDGE.length - 1];
 
   return {
-    level: window.TILE_PARAMS.ZOOM_TO_LEVEL[zoom] || 0, // deprecated
-    tilesPerEdge: window.TILE_PARAMS.TILES_PER_EDGE[zoom] || maxTilesPerEdge,
-    minLinkLength: window.TILE_PARAMS.ZOOM_TO_LINK_LENGTH[zoom] || 0,
-    hasPortals: zoom >= window.TILE_PARAMS.ZOOM_TO_LINK_LENGTH.length, // no portals returned at all when link length limits things
-    zoom: zoom, // include the zoom level, for reference
+    level: window.TILE_PARAMS.ZOOM_TO_LEVEL[zoomInt] || 0, // deprecated
+    tilesPerEdge: window.TILE_PARAMS.TILES_PER_EDGE[zoomInt] || maxTilesPerEdge,
+    minLinkLength: window.TILE_PARAMS.ZOOM_TO_LINK_LENGTH[zoomInt] || 0,
+    hasPortals: zoomInt >= window.TILE_PARAMS.ZOOM_TO_LINK_LENGTH.length, // no portals returned at all when link length limits things
+    zoom: zoomInt, // include the zoom level, for reference
   };
 };
 
@@ -95,6 +97,9 @@ window.getDataZoomTileParameters = function (zoom) {
  * @returns {number} The adjusted zoom level for data requests.
  */
 window.getDataZoomForMapZoom = function (zoom) {
+  // Floor zoom to integer (Mapbox may return fractional zoom)
+  zoom = Math.floor(zoom);
+
   // we can fetch data at a zoom level different to the map zoom.
 
   // NOTE: the specifics of this are tightly coupled with the above ZOOM_TO_LEVEL and TILES_PER_EDGE arrays

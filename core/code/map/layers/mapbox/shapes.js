@@ -1,4 +1,4 @@
-/* global IITC, mapboxgl -- eslint */
+/* global IITC -- eslint */
 
 /**
  * @file Mapbox GL JS basic shape implementations.

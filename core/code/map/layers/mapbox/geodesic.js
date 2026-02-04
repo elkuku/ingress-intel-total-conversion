@@ -43,18 +43,40 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    * @returns {this}
    */
   MapboxGeoJSONLayer.prototype.addTo = function (map) {
-    // Get the adapter
-    var adapter = map;
-    if (map.getRendererType && map.getRendererType() !== 'mapbox') {
+    // Get the adapter - check multiple ways it might be available
+    var adapter = null;
+
+    // If map has _adapter property (wrapped native map from shim)
+    if (map._adapter) {
+      adapter = map._adapter;
+    }
+    // If map has _iitcAdapter property
+    else if (map._iitcAdapter) {
+      adapter = map._iitcAdapter;
+    }
+    // If map itself is an adapter (has addMapboxLayer method)
+    else if (map.addMapboxLayer) {
+      adapter = map;
+    }
+    // Try getting from IITC.map
+    else if (IITC.map.getAdapter) {
+      adapter = IITC.map.getAdapter();
+    }
+
+    if (!adapter || !adapter.addMapboxLayer) {
+      console.warn('[Mapbox] Could not find adapter for geodesic layer');
       return this;
     }
-    if (!map.getRendererType && map._adapter) {
-      adapter = map._adapter;
+
+    // Check if this is mapbox renderer
+    if (adapter.getRendererType && adapter.getRendererType() !== 'mapbox') {
+      return this;
     }
 
     this._map = adapter;
-    this._sourceId = this._generateId() + '-source';
-    this._layerId = this._generateId() + '-layer';
+    var baseId = this._generateId();
+    this._sourceId = baseId + '-source';
+    this._layerId = baseId + '-layer';
 
     this._addToMap();
     return this;
@@ -75,8 +97,22 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeoJSONLayer.prototype.remove = function () {
     if (this._map) {
-      this._map.removeMapboxLayer(this._layerId);
-      this._map.removeSource(this._sourceId);
+      var nativeMap = this._map.getNativeMap();
+      try {
+        // Remove layer first, then source
+        try {
+          nativeMap.removeLayer(this._layerId);
+        } catch (e) {
+          // Layer might not exist
+        }
+        try {
+          nativeMap.removeSource(this._sourceId);
+        } catch (e) {
+          // Source might not exist or still has layers
+        }
+      } catch (e) {
+        console.warn('[Mapbox] Error removing layer:', e.message);
+      }
       this._map = null;
     }
     return this;
@@ -486,9 +522,15 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeodesicPolygon.prototype.remove = function () {
     if (this._map) {
-      this._map.removeMapboxLayer(this._fillLayerId);
-      this._map.removeMapboxLayer(this._strokeLayerId);
-      this._map.removeSource(this._sourceId);
+      var nativeMap = this._map.getNativeMap();
+      try {
+        // Remove layers first, then source
+        try { nativeMap.removeLayer(this._fillLayerId); } catch (e) { /* ignore */ }
+        try { nativeMap.removeLayer(this._strokeLayerId); } catch (e) { /* ignore */ }
+        try { nativeMap.removeSource(this._sourceId); } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.warn('[Mapbox] Error removing polygon:', e.message);
+      }
       this._map = null;
     }
     return this;
@@ -672,9 +714,15 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeodesicCircle.prototype.remove = function () {
     if (this._map) {
-      this._map.removeMapboxLayer(this._fillLayerId);
-      this._map.removeMapboxLayer(this._strokeLayerId);
-      this._map.removeSource(this._sourceId);
+      var nativeMap = this._map.getNativeMap();
+      try {
+        // Remove layers first, then source
+        try { nativeMap.removeLayer(this._fillLayerId); } catch (e) { /* ignore */ }
+        try { nativeMap.removeLayer(this._strokeLayerId); } catch (e) { /* ignore */ }
+        try { nativeMap.removeSource(this._sourceId); } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.warn('[Mapbox] Error removing circle:', e.message);
+      }
       this._map = null;
     }
     return this;

@@ -55,7 +55,7 @@ Next Steps (Phase 2+)
 
 1. ~~Implement MapboxAdapter in adapters/mapbox.js~~ (Completed)
 2. ~~Implement Mapbox layer factory in layers/mapbox/~~ (Completed)
-3. Add renderer selection UI
+3. ~~Add renderer selection UI~~ (Completed)
 4. Create plugin migration guide
 
 ---
@@ -114,4 +114,53 @@ IITC.map.layers.mapbox
 2. **Geodesic accuracy**: Uses IITC.geo calculations with S2 Earth radius (6,367,000m) for Ingress-accurate distances
 3. **Leaflet API compatibility**: All layer classes provide addTo(), remove(), setStyle(), on(), off(), getBounds() methods
 4. **Style updates**: Paint properties updated via adapter's setPaintProperty() method
-5. **Event handling**: Click/contextmenu events normalized to Leaflet-like format   
+5. **Event handling**: Click/contextmenu events normalized to Leaflet-like format
+
+---
+
+## Phase 3: Renderer Selection UI
+
+### New Files Created
+
+1. **core/code/renderer_settings.js** - Complete renderer settings module
+
+### Features
+
+#### IITC.renderer Namespace
+
+```javascript
+IITC.renderer.getRenderer()      // Get saved renderer preference
+IITC.renderer.setRenderer(id)    // Save renderer preference
+IITC.renderer.getMapboxToken()   // Get saved Mapbox token
+IITC.renderer.setMapboxToken(t)  // Save Mapbox token
+IITC.renderer.getMapboxStyle()   // Get saved Mapbox style
+IITC.renderer.setMapboxStyle(s)  // Save Mapbox style
+IITC.renderer.getConfig()        // Get full config for map init
+IITC.renderer.showSettings()     // Show settings dialog
+```
+
+#### Settings Dialog
+
+- Dropdown to select renderer (Leaflet or Mapbox)
+- Mapbox access token input field
+- Mapbox style selector (Dark, Light, Streets, Satellite, etc.)
+- Status display showing current active renderer
+- Warning about page reload requirement
+
+#### Persistence
+
+- `localStorage['iitc-renderer']` - Selected renderer ID
+- `localStorage['iitc-renderer-mapbox-token']` - Mapbox access token
+- `localStorage['iitc-renderer-mapbox-style']` - Mapbox style URL
+
+#### Initialization Sequence
+
+1. `renderer_settings.js` loads and immediately calls `IITC.renderer.init()`
+2. `init()` reads localStorage and sets `window.mapRendererConfig`
+3. `boot()` calls `setupMap()` which calls `IITC.map.initialize()`
+4. `IITC.map.initialize()` reads `window.mapRendererConfig` and creates the appropriate adapter
+5. After `iitcLoaded`, `IITC.renderer.setupUI()` adds the toolbox button
+
+#### Toolbox Integration
+
+Adds a "Renderer" button to the IITC toolbox that opens the settings dialog.   

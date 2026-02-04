@@ -282,14 +282,57 @@ window.portalMarkerScale = function () {
 
 /**
  * Creates a new portal marker on the map.
+ * Uses IITC.map.factory for renderer-agnostic marker creation.
  *
  * @function createMarker
- * @param {L.LatLng} latlng - The latitude and longitude where the marker will be placed.
+ * @param {L.LatLng|Object} latlng - The latitude and longitude where the marker will be placed.
  * @param {Object} data - The IITC-specific entity data to be stored in the marker options.
- * @returns {L.PortalMarker} A Leaflet circle marker representing the portal.
+ * @returns {Object} A portal marker (L.PortalMarker for Leaflet, Mapbox marker for Mapbox).
  */
 window.createMarker = function (latlng, data) {
+  // Use the map factory if available for renderer-agnostic marker creation
+  var factory = IITC.map.getFactory ? IITC.map.getFactory() : null;
+  if (factory && typeof factory.createPortalMarker === 'function') {
+    return factory.createPortalMarker(latlng, data);
+  }
+  // Fallback to Leaflet marker
   return new L.PortalMarker(latlng, data);
+};
+
+/**
+ * Creates a geodesic polyline (used for links).
+ * Uses IITC.map.factory for renderer-agnostic creation.
+ *
+ * @function createGeodesicPolyline
+ * @param {Array} latlngs - Array of LatLng points
+ * @param {Object} options - Polyline options
+ * @returns {Object} A geodesic polyline
+ */
+window.createGeodesicPolyline = function (latlngs, options) {
+  var factory = IITC.map.getFactory ? IITC.map.getFactory() : null;
+  if (factory && typeof factory.createGeodesicPolyline === 'function') {
+    return factory.createGeodesicPolyline(latlngs, options);
+  }
+  // Fallback to Leaflet
+  return L.geodesicPolyline(latlngs, options);
+};
+
+/**
+ * Creates a geodesic polygon (used for fields).
+ * Uses IITC.map.factory for renderer-agnostic creation.
+ *
+ * @function createGeodesicPolygon
+ * @param {Array} latlngs - Array of LatLng points
+ * @param {Object} options - Polygon options
+ * @returns {Object} A geodesic polygon
+ */
+window.createGeodesicPolygon = function (latlngs, options) {
+  var factory = IITC.map.getFactory ? IITC.map.getFactory() : null;
+  if (factory && typeof factory.createGeodesicPolygon === 'function') {
+    return factory.createGeodesicPolygon(latlngs, options);
+  }
+  // Fallback to Leaflet
+  return L.geodesicPolygon(latlngs, options);
 };
 
 /**

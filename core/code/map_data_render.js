@@ -486,7 +486,7 @@ window.Render.prototype.createFieldEntity = function (ent) {
     new L.LatLng(data.points[2].latE6 / 1e6, data.points[2].lngE6 / 1e6),
   ];
 
-  var poly = L.geodesicPolygon(latlngs, {
+  var poly = window.createGeodesicPolygon(latlngs, {
     fillColor: window.COLORS[team],
     fillOpacity: 0.25,
     stroke: false,
@@ -553,7 +553,7 @@ window.Render.prototype.createLinkEntity = function (ent) {
 
   var team = window.teamStringToId(ent[2][1]);
   var latlngs = [new L.LatLng(data.oLatE6 / 1e6, data.oLngE6 / 1e6), new L.LatLng(data.dLatE6 / 1e6, data.dLngE6 / 1e6)];
-  var poly = L.geodesicPolyline(latlngs, {
+  var poly = window.createGeodesicPolyline(latlngs, {
     color: window.COLORS[team],
     opacity: 1,
     weight: 2,

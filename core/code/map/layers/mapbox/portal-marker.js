@@ -59,65 +59,147 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
 
     var adapter = this._adapter;
     var self = this;
+    var nativeMap = adapter.getNativeMap();
 
-    // Add GeoJSON source for portals
-    adapter.addSource(this._sourceId, {
-      type: 'geojson',
-      data: {
-        type: 'FeatureCollection',
-        features: [],
-      },
-    });
+    var setupSourceAndLayer = function () {
+      console.log('[Mapbox] setupSourceAndLayer called, style loaded:', nativeMap.isStyleLoaded());
 
-    // Add fill layer for portals
-    adapter.addMapboxLayer({
-      id: this._layerId,
-      type: 'circle',
-      source: this._sourceId,
-      paint: {
-        'circle-radius': ['get', 'radius'],
-        'circle-color': ['get', 'fillColor'],
-        'circle-opacity': ['get', 'fillOpacity'],
-        'circle-stroke-width': ['get', 'weight'],
-        'circle-stroke-color': ['get', 'color'],
-        'circle-stroke-opacity': ['get', 'opacity'],
-      },
-    });
-
-    // Set up click handler
-    var map = adapter.getNativeMap();
-    map.on('click', this._layerId, function (e) {
-      if (e.features && e.features.length > 0) {
-        var feature = e.features[0];
-        var guid = feature.properties.guid;
-        self._handlePortalClick(guid, e);
+      // Add GeoJSON source for portals if it doesn't exist
+      if (!nativeMap.getSource(self._sourceId)) {
+        try {
+          nativeMap.addSource(self._sourceId, {
+            type: 'geojson',
+            data: {
+              type: 'FeatureCollection',
+              features: [],
+            },
+          });
+          console.log('[Mapbox] Portal source created:', self._sourceId);
+        } catch (e) {
+          console.error('[Mapbox] Error creating source:', e);
+        }
       }
-    });
 
-    map.on('dblclick', this._layerId, function (e) {
-      if (e.features && e.features.length > 0) {
-        var feature = e.features[0];
-        var guid = feature.properties.guid;
-        self._handlePortalDblClick(guid, e);
+      // Verify source exists before adding layer
+      var sourceCheck = nativeMap.getSource(self._sourceId);
+      console.log('[Mapbox] Source check before layer creation:', sourceCheck ? 'exists' : 'MISSING');
+
+      // Add circle layer for portals if it doesn't exist
+      if (!nativeMap.getLayer(self._layerId)) {
+        try {
+          var layerDef = {
+            id: self._layerId,
+            type: 'circle',
+            source: self._sourceId,
+            paint: {
+              // Data-driven styling from feature properties
+              'circle-radius': ['coalesce', ['get', 'radius'], 8],
+              'circle-color': ['coalesce', ['get', 'fillColor'], '#00FF00'],
+              'circle-opacity': ['coalesce', ['get', 'fillOpacity'], 0.8],
+              'circle-stroke-width': ['coalesce', ['get', 'weight'], 2],
+              'circle-stroke-color': ['coalesce', ['get', 'color'], '#FFFFFF'],
+              'circle-stroke-opacity': ['coalesce', ['get', 'opacity'], 1],
+            },
+          };
+          console.log('[Mapbox] Adding layer, source exists:', !!sourceCheck);
+          console.log('[Mapbox] Style layers before:', nativeMap.getStyle().layers.length);
+
+          // Try using the native addLayer directly
+          nativeMap.addLayer(layerDef);
+
+          // Check immediately
+          var addedLayer = nativeMap.getLayer(self._layerId);
+          console.log('[Mapbox] Layer after addLayer:', addedLayer ? 'exists' : 'MISSING');
+          console.log('[Mapbox] Style layers after:', nativeMap.getStyle().layers.length);
+
+          if (!addedLayer) {
+            // Try alternative: check if it's in the style
+            var styleLayers = nativeMap.getStyle().layers;
+            var found = styleLayers.find(function(l) { return l.id === self._layerId; });
+            console.log('[Mapbox] Layer in style.layers:', found ? 'YES' : 'NO');
+
+            // List last 5 layers
+            console.log('[Mapbox] Last 5 layers:', styleLayers.slice(-5).map(function(l) { return l.id; }));
+          } else {
+            console.log('[Mapbox] Portal layer created successfully');
+            nativeMap.moveLayer(self._layerId);
+          }
+        } catch (e) {
+          console.error('[Mapbox] Error creating layer:', e.message);
+          console.error('[Mapbox] Error stack:', e.stack);
+        }
+      } else {
+        console.log('[Mapbox] Portal layer already exists');
       }
-    });
+    };
 
-    map.on('contextmenu', this._layerId, function (e) {
-      if (e.features && e.features.length > 0) {
-        var feature = e.features[0];
-        var guid = feature.properties.guid;
-        self._handlePortalContextMenu(guid, e);
-      }
-    });
+    var setupEventHandlers = function () {
+      // Set up click handler
+      nativeMap.on('click', self._layerId, function (e) {
+        if (e.features && e.features.length > 0) {
+          var feature = e.features[0];
+          var guid = feature.properties.guid;
+          self._handlePortalClick(guid, e);
+        }
+      });
 
-    // Change cursor on hover
-    map.on('mouseenter', this._layerId, function () {
-      map.getCanvas().style.cursor = 'pointer';
-    });
+      nativeMap.on('dblclick', self._layerId, function (e) {
+        if (e.features && e.features.length > 0) {
+          var feature = e.features[0];
+          var guid = feature.properties.guid;
+          self._handlePortalDblClick(guid, e);
+        }
+      });
 
-    map.on('mouseleave', this._layerId, function () {
-      map.getCanvas().style.cursor = '';
-    });
+      nativeMap.on('contextmenu', self._layerId, function (e) {
+        if (e.features && e.features.length > 0) {
+          var feature = e.features[0];
+          var guid = feature.properties.guid;
+          self._handlePortalContextMenu(guid, e);
+        }
+      });
+
+      // Change cursor on hover
+      nativeMap.on('mouseenter', self._layerId, function () {
+        nativeMap.getCanvas().style.cursor = 'pointer';
+      });
+
+      nativeMap.on('mouseleave', self._layerId, function () {
+        nativeMap.getCanvas().style.cursor = '';
+      });
+    };
+
+    var setupAll = function () {
+      setupSourceAndLayer();
+      setupEventHandlers();
+    };
+
+    // Execute after style is fully loaded
+    // Use both 'load' and 'style.load' events and check isStyleLoaded()
+    var styleLoaded = nativeMap.isStyleLoaded();
+    console.log('[Mapbox] Initial style loaded check:', styleLoaded);
+
+    if (styleLoaded) {
+      setupAll();
+    } else {
+      // Try both events in case one already fired
+      var setupOnce = function () {
+        if (!nativeMap.getLayer(self._layerId)) {
+          console.log('[Mapbox] Running setup from event');
+          setupAll();
+        }
+      };
+      nativeMap.once('style.load', setupOnce);
+      nativeMap.once('load', setupOnce);
+      // Also try with a small delay as fallback
+      setTimeout(function () {
+        if (!nativeMap.getLayer(self._layerId) && nativeMap.isStyleLoaded()) {
+          console.log('[Mapbox] Running setup from timeout fallback');
+          setupAll();
+        }
+      }, 500);
+    }
+    console.log('[Mapbox] Portal layer initialization queued');
 
     this._initialized = true;
   };
@@ -170,7 +252,15 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
 
     var guid = marker.options.guid;
     this._portals.set(guid, marker);
-    this._features.set(guid, marker.toGeoJSON());
+    var feature = marker.toGeoJSON();
+    this._features.set(guid, feature);
+
+    // Log first few portals added for debugging
+    if (this._portals.size <= 3) {
+      console.log('[Mapbox] Portal added:', guid, 'total:', this._portals.size);
+      console.log('[Mapbox] Feature:', JSON.stringify(feature));
+    }
+
     this._updateSource();
   };
 
@@ -198,15 +288,51 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
 
   /**
    * Update the GeoJSON source with current features.
+   * Uses debouncing to batch rapid updates.
    * @private
    */
   PortalManager.prototype._updateSource = function () {
-    var source = this._adapter.getSource(this._sourceId);
+    var self = this;
+
+    // Debounce updates to avoid excessive calls
+    if (this._updatePending) return;
+    this._updatePending = true;
+
+    // Use requestAnimationFrame for batching
+    requestAnimationFrame(function () {
+      self._updatePending = false;
+      self._doUpdateSource();
+    });
+  };
+
+  /**
+   * Actually perform the source update with retry logic.
+   * @private
+   */
+  PortalManager.prototype._doUpdateSource = function (retryCount) {
+    var self = this;
+    retryCount = retryCount || 0;
+    var maxRetries = 20;
+
+    var nativeMap = this._adapter.getNativeMap();
+    var source = nativeMap.getSource(this._sourceId);
+
     if (source) {
+      var features = Array.from(this._features.values());
       source.setData({
         type: 'FeatureCollection',
-        features: Array.from(this._features.values()),
+        features: features,
       });
+      if (retryCount > 0) {
+        console.log('[Mapbox] Source update succeeded after', retryCount, 'retries,', features.length, 'features');
+      }
+    } else if (retryCount < maxRetries) {
+      // Source not ready yet, retry with delay
+      setTimeout(function () {
+        self._doUpdateSource(retryCount + 1);
+      }, 100);
+    } else {
+      console.error('[Mapbox] Failed to update source after', maxRetries, 'retries');
     }
   };
 
@@ -305,6 +431,14 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
   MapboxPortalMarker.prototype.addTo = function (map) {
     // Get the adapter (map might be the adapter or the native map)
     var adapter = map._adapter || map;
+
+    // Debug: only log first call
+    if (!MapboxPortalMarker._loggedAddTo) {
+      MapboxPortalMarker._loggedAddTo = true;
+      console.log('[Mapbox] addTo called, map._adapter:', !!map._adapter);
+      console.log('[Mapbox] adapter.getRendererType:', adapter.getRendererType ? adapter.getRendererType() : 'no method');
+    }
+
     if (adapter.getRendererType && adapter.getRendererType() === 'mapbox') {
       this._map = adapter;
       var manager = getPortalManager(adapter);
@@ -609,6 +743,44 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
   // Export
   IITC.map.layers.mapbox.PortalMarker = MapboxPortalMarker;
   IITC.map.layers.mapbox.PortalManager = PortalManager;
+
+  // Debug function - call from console: IITC.map.layers.mapbox.debugPortals()
+  IITC.map.layers.mapbox.debugPortals = function () {
+    var map = window.map;
+    var nativeMap = map._adapter ? map._adapter.getNativeMap() : map;
+    var source = nativeMap.getSource('iitc-portals-source');
+    var layer = nativeMap.getLayer('iitc-portals-layer');
+    var allLayers = nativeMap.getStyle().layers;
+    var portalLayerIndex = allLayers.findIndex(function (l) { return l.id === 'iitc-portals-layer'; });
+
+    console.group('Mapbox Portal Debug');
+    console.log('Source exists:', !!source);
+    console.log('Layer exists:', !!layer);
+    console.log('Layer index:', portalLayerIndex, 'of', allLayers.length, '(higher = on top)');
+    console.log('Layer visibility:', layer ? layer.layout?.visibility || 'visible' : 'N/A');
+
+    if (layer) {
+      console.log('Layer paint properties:', layer.paint);
+    }
+
+    var features = nativeMap.querySourceFeatures('iitc-portals-source');
+    console.log('Features in source (querySourceFeatures):', features.length);
+
+    // Also check rendered features
+    var renderedFeatures = nativeMap.queryRenderedFeatures({ layers: ['iitc-portals-layer'] });
+    console.log('Rendered features (visible on screen):', renderedFeatures.length);
+
+    if (features.length > 0) {
+      console.log('Sample feature:', features[0]);
+    }
+
+    // Check current bounds
+    var bounds = nativeMap.getBounds();
+    console.log('Map bounds:', bounds.toArray());
+    console.log('Zoom:', nativeMap.getZoom());
+
+    console.groupEnd();
+  };
   IITC.map.layers.mapbox.getPortalManager = getPortalManager;
   IITC.map.layers.mapbox.PortalMarkerConstants = PortalMarkerConstants;
 })();

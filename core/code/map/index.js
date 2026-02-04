@@ -75,6 +75,7 @@
     // Merge config with options
     _config.renderer = options.renderer || window.mapRendererConfig?.renderer || 'leaflet';
     _config.mapboxToken = options.mapboxToken || window.mapRendererConfig?.mapboxToken;
+    _config.mapboxStyle = options.style || window.mapRendererConfig?.style;
 
     // Remove renderer-specific options from map options
     var mapOptions = Object.assign({}, options);
@@ -82,10 +83,22 @@
     delete mapOptions.mapboxToken;
 
     // Create adapter based on renderer type
+    log.log('[IITC Debug] Creating adapter for renderer:', _config.renderer);
+    log.log('[IITC Debug] IITC.map.adapters:', IITC.map.adapters);
+    log.log('[IITC Debug] IITC.map.adapters keys:', Object.keys(IITC.map.adapters || {}));
+    log.log('[IITC Debug] MapboxAdapter:', IITC.map.adapters?.MapboxAdapter);
+    log.log('[IITC Debug] mapboxgl defined:', typeof window.mapboxgl !== 'undefined');
+
     switch (_config.renderer) {
       case 'mapbox':
-        if (!IITC.map.adapters.MapboxAdapter) {
+        // Check if Mapbox GL JS library is loaded (use window.mapboxgl for explicit global reference)
+        if (typeof window.mapboxgl === 'undefined') {
+          log.error('Mapbox GL JS library not loaded, falling back to Leaflet');
+          _config.renderer = 'leaflet';
+        } else if (!IITC.map.adapters || !IITC.map.adapters.MapboxAdapter) {
           log.error('Mapbox adapter not loaded, falling back to Leaflet');
+          log.error('[IITC Debug] adapters namespace exists:', !!IITC.map.adapters);
+          log.error('[IITC Debug] MapboxAdapter exists:', !!(IITC.map.adapters && IITC.map.adapters.MapboxAdapter));
           _config.renderer = 'leaflet';
         } else if (!_config.mapboxToken) {
           log.error('Mapbox token not provided, falling back to Leaflet');
@@ -93,6 +106,9 @@
         } else {
           _adapter = new IITC.map.adapters.MapboxAdapter();
           mapOptions.accessToken = _config.mapboxToken;
+          if (_config.mapboxStyle) {
+            mapOptions.style = _config.mapboxStyle;
+          }
           break;
         }
       // Falls through to leaflet

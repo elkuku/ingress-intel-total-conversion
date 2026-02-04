@@ -182,14 +182,332 @@ IITC.map.compat = IITC.map.compat || {};
    */
   IITC.map.compat.createSimpleWrapper = function (adapter) {
     var nativeMap = adapter.getNativeMap();
+    var rendererType = adapter.getRendererType();
 
-    // Store reference to adapter
+    // Store reference to adapter (use both names for compatibility)
     nativeMap._iitcAdapter = adapter;
+    nativeMap._adapter = adapter;
 
     // Add IITC-specific methods that don't exist on native map
     nativeMap.getRendererType = function () {
       return adapter.getRendererType();
     };
+
+    // For Mapbox, we need to wrap several methods to maintain Leaflet API compatibility
+    if (rendererType === 'mapbox') {
+      // Add options property for code that expects Leaflet-style options
+      if (!nativeMap.options) {
+        nativeMap.options = {
+          // Mapbox uses WebGL, similar to preferCanvas in terms of performance
+          preferCanvas: true,
+          // Common options that might be accessed
+          minZoom: nativeMap.getMinZoom ? nativeMap.getMinZoom() : 0,
+          maxZoom: nativeMap.getMaxZoom ? nativeMap.getMaxZoom() : 22,
+          // CRS placeholder for code that checks it
+          crs: {
+            projection: {
+              MAX_LATITUDE: 85.051129
+            }
+          }
+        };
+      }
+
+      // Store original Mapbox methods
+      var originalOn = nativeMap.on.bind(nativeMap);
+      var originalOff = nativeMap.off.bind(nativeMap);
+      var originalOnce = nativeMap.once.bind(nativeMap);
+
+      // Wrap 'on' to handle Leaflet-style context binding
+      // Leaflet: map.on(event, handler, context)
+      // Mapbox: map.on(event, handler) OR map.on(event, layerId, handler)
+      nativeMap.on = function (event, callback, context) {
+        // If context is provided and is an object (not a string layer ID), bind it
+        if (context && typeof context === 'object') {
+          var boundCallback = callback.bind(context);
+          // Store mapping for potential removal
+          if (!nativeMap._contextCallbacks) {
+            nativeMap._contextCallbacks = new Map();
+          }
+          if (!nativeMap._contextCallbacks.has(event)) {
+            nativeMap._contextCallbacks.set(event, new Map());
+          }
+          nativeMap._contextCallbacks.get(event).set(callback, boundCallback);
+          originalOn(event, boundCallback);
+        } else if (typeof callback === 'function') {
+          originalOn(event, callback);
+        } else {
+          // Might be layer-specific event: on(event, layerId, callback)
+          originalOn(event, callback, context);
+        }
+        return nativeMap;
+      };
+
+      // Wrap 'off' to handle context-bound callbacks
+      nativeMap.off = function (event, callback, context) {
+        if (context && typeof context === 'object' && nativeMap._contextCallbacks) {
+          var eventCallbacks = nativeMap._contextCallbacks.get(event);
+          if (eventCallbacks && eventCallbacks.has(callback)) {
+            var boundCallback = eventCallbacks.get(callback);
+            originalOff(event, boundCallback);
+            eventCallbacks.delete(callback);
+            return nativeMap;
+          }
+        }
+        originalOff(event, callback);
+        return nativeMap;
+      };
+
+      // Wrap 'once' to handle context binding
+      nativeMap.once = function (event, callback, context) {
+        if (context && typeof context === 'object') {
+          originalOnce(event, callback.bind(context));
+        } else {
+          originalOnce(event, callback);
+        }
+        return nativeMap;
+      };
+
+      // Add Leaflet-style event aliases
+      nativeMap.addEventListener = nativeMap.on;
+      nativeMap.removeEventListener = nativeMap.off;
+
+      // Track layers manually since Mapbox doesn't have hasLayer
+      if (!nativeMap._iitcLayers) {
+        nativeMap._iitcLayers = new Set();
+      }
+
+      // Store original Mapbox addLayer for raw layer definitions
+      var originalAddLayer = nativeMap.addLayer.bind(nativeMap);
+
+      // Wrap addLayer to track layers
+      // Use a flag to prevent recursion (addLayer -> addTo -> addLayer)
+      nativeMap._addingLayer = false;
+      nativeMap.addLayer = function (layer, beforeId) {
+        if (layer && !nativeMap._addingLayer) {
+          // Check if this is a raw Mapbox layer definition (has id and type properties)
+          if (layer.id && layer.type && layer.source) {
+            // This is a Mapbox layer definition, use native addLayer
+            return originalAddLayer(layer, beforeId);
+          }
+
+          if (nativeMap._iitcLayers.has(layer)) {
+            return nativeMap; // Already added
+          }
+          nativeMap._iitcLayers.add(layer);
+          nativeMap._addingLayer = true;
+          try {
+            // If layer has _addToMap method (IITC/Mapbox layer objects), use it
+            if (typeof layer._addToMap === 'function') {
+              layer._addToMap(nativeMap);
+            } else if (typeof layer.addTo === 'function') {
+              // Leaflet-style layers use addTo
+              layer.addTo(nativeMap);
+            }
+          } finally {
+            nativeMap._addingLayer = false;
+          }
+        }
+        return nativeMap;
+      };
+
+      // Store original Mapbox removeLayer for layer IDs
+      var originalRemoveLayer = nativeMap.removeLayer.bind(nativeMap);
+
+      // Wrap removeLayer to track layers
+      nativeMap._removingLayer = false;
+      nativeMap.removeLayer = function (layer) {
+        if (layer && !nativeMap._removingLayer) {
+          // Check if this is a layer ID string (for direct Mapbox layer removal)
+          if (typeof layer === 'string') {
+            // This is a Mapbox layer ID, use native removeLayer
+            return originalRemoveLayer(layer);
+          }
+
+          if (!nativeMap._iitcLayers.has(layer)) {
+            return nativeMap; // Not on map
+          }
+          nativeMap._iitcLayers.delete(layer);
+          nativeMap._removingLayer = true;
+          try {
+            // If layer has _removeFromMap method, use it
+            if (typeof layer._removeFromMap === 'function') {
+              layer._removeFromMap(nativeMap);
+            } else if (typeof layer.remove === 'function') {
+              layer.remove();
+            }
+          } finally {
+            nativeMap._removingLayer = false;
+          }
+        }
+        return nativeMap;
+      };
+
+      // Implement hasLayer
+      nativeMap.hasLayer = function (layer) {
+        return nativeMap._iitcLayers.has(layer);
+      };
+
+      // Implement eachLayer
+      nativeMap.eachLayer = function (fn, context) {
+        nativeMap._iitcLayers.forEach(function (layer) {
+          fn.call(context || nativeMap, layer);
+        });
+        return nativeMap;
+      };
+
+      // Helper to create Leaflet-compatible Point objects
+      function createCompatPoint(x, y) {
+        return {
+          x: x,
+          y: y,
+          subtract: function (other) {
+            return createCompatPoint(this.x - other.x, this.y - other.y);
+          },
+          add: function (other) {
+            return createCompatPoint(this.x + other.x, this.y + other.y);
+          },
+          multiplyBy: function (num) {
+            return createCompatPoint(this.x * num, this.y * num);
+          },
+          divideBy: function (num) {
+            return createCompatPoint(this.x / num, this.y / num);
+          },
+          distanceTo: function (other) {
+            var dx = this.x - other.x;
+            var dy = this.y - other.y;
+            return Math.sqrt(dx * dx + dy * dy);
+          },
+          round: function () {
+            return createCompatPoint(Math.round(this.x), Math.round(this.y));
+          },
+          floor: function () {
+            return createCompatPoint(Math.floor(this.x), Math.floor(this.y));
+          },
+          ceil: function () {
+            return createCompatPoint(Math.ceil(this.x), Math.ceil(this.y));
+          },
+          equals: function (other) {
+            return this.x === other.x && this.y === other.y;
+          },
+          clone: function () {
+            return createCompatPoint(this.x, this.y);
+          },
+          toString: function () {
+            return 'Point(' + this.x + ', ' + this.y + ')';
+          }
+        };
+      }
+
+      // Wrap project to return Leaflet-compatible Point
+      var originalProject = nativeMap.project.bind(nativeMap);
+      nativeMap.project = function (latlng, zoom) {
+        // Normalize latlng
+        var lat = latlng.lat !== undefined ? latlng.lat : latlng[0];
+        var lng = latlng.lng !== undefined ? latlng.lng : latlng[1];
+
+        // Mapbox project returns {x, y} in pixels
+        var point = originalProject([lng, lat]);
+        return createCompatPoint(point.x, point.y);
+      };
+
+      // Wrap unproject to accept Leaflet-style Point and return LatLng
+      var originalUnproject = nativeMap.unproject.bind(nativeMap);
+      nativeMap.unproject = function (point, zoom) {
+        var x = point.x !== undefined ? point.x : point[0];
+        var y = point.y !== undefined ? point.y : point[1];
+
+        var lngLat = originalUnproject([x, y]);
+        // Return Leaflet-style {lat, lng}
+        return {
+          lat: lngLat.lat,
+          lng: lngLat.lng,
+          wrap: function () {
+            var wrappedLng = this.lng;
+            while (wrappedLng > 180) wrappedLng -= 360;
+            while (wrappedLng < -180) wrappedLng += 360;
+            return { lat: this.lat, lng: wrappedLng };
+          }
+        };
+      };
+
+
+      // Wrap getCenter to return Leaflet-compatible LatLng
+      var originalGetCenter = nativeMap.getCenter.bind(nativeMap);
+      nativeMap.getCenter = function () {
+        var center = originalGetCenter();
+        return {
+          lat: center.lat,
+          lng: center.lng,
+          wrap: function () {
+            var wrappedLng = this.lng;
+            while (wrappedLng > 180) wrappedLng -= 360;
+            while (wrappedLng < -180) wrappedLng += 360;
+            return { lat: this.lat, lng: wrappedLng };
+          }
+        };
+      };
+
+      // Wrap getBounds to return Leaflet-compatible LatLngBounds
+      var originalGetBounds = nativeMap.getBounds.bind(nativeMap);
+      nativeMap.getBounds = function () {
+        var bounds = originalGetBounds();
+        var south = bounds.getSouth();
+        var north = bounds.getNorth();
+        var west = bounds.getWest();
+        var east = bounds.getEast();
+        return {
+          _southWest: { lat: south, lng: west },
+          _northEast: { lat: north, lng: east },
+          getSouth: function () { return south; },
+          getNorth: function () { return north; },
+          getWest: function () { return west; },
+          getEast: function () { return east; },
+          getSouthWest: function () { return this._southWest; },
+          getNorthEast: function () { return this._northEast; },
+          getNorthWest: function () { return { lat: this._northEast.lat, lng: this._southWest.lng }; },
+          getSouthEast: function () { return { lat: this._southWest.lat, lng: this._northEast.lng }; },
+          getCenter: function () {
+            return {
+              lat: (this._southWest.lat + this._northEast.lat) / 2,
+              lng: (this._southWest.lng + this._northEast.lng) / 2
+            };
+          },
+          contains: function (latlng) {
+            var lat = latlng.lat !== undefined ? latlng.lat : latlng[0];
+            var lng = latlng.lng !== undefined ? latlng.lng : latlng[1];
+            return lat >= this._southWest.lat && lat <= this._northEast.lat &&
+                   lng >= this._southWest.lng && lng <= this._northEast.lng;
+          },
+          extend: function (latlng) {
+            var lat = latlng.lat !== undefined ? latlng.lat : latlng[0];
+            var lng = latlng.lng !== undefined ? latlng.lng : latlng[1];
+            this._southWest.lat = Math.min(this._southWest.lat, lat);
+            this._southWest.lng = Math.min(this._southWest.lng, lng);
+            this._northEast.lat = Math.max(this._northEast.lat, lat);
+            this._northEast.lng = Math.max(this._northEast.lng, lng);
+            return this;
+          },
+          pad: function (bufferRatio) {
+            var sw = this._southWest;
+            var ne = this._northEast;
+            var heightBuffer = Math.abs(sw.lat - ne.lat) * bufferRatio;
+            var widthBuffer = Math.abs(sw.lng - ne.lng) * bufferRatio;
+            return {
+              _southWest: { lat: sw.lat - heightBuffer, lng: sw.lng - widthBuffer },
+              _northEast: { lat: ne.lat + heightBuffer, lng: ne.lng + widthBuffer },
+              getSouth: function () { return this._southWest.lat; },
+              getNorth: function () { return this._northEast.lat; },
+              getWest: function () { return this._southWest.lng; },
+              getEast: function () { return this._northEast.lng; }
+            };
+          },
+          toBBoxString: function () {
+            return this._southWest.lng + ',' + this._southWest.lat + ',' +
+                   this._northEast.lng + ',' + this._northEast.lat;
+          }
+        };
+      };
+    }
 
     return nativeMap;
   };
