@@ -1,0 +1,614 @@
+/* global IITC, mapboxgl -- eslint */
+
+/**
+ * @file Mapbox GL JS portal marker implementation.
+ * Uses GeoJSON sources and circle layers to render portals efficiently.
+ * @module map/layers/mapbox/portal-marker
+ */
+
+IITC.map.layers = IITC.map.layers || {};
+IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
+
+(function () {
+  'use strict';
+
+  /**
+   * Portal marker constants matching Leaflet implementation.
+   * @memberof IITC.map.layers.mapbox
+   */
+  var PortalMarkerConstants = {
+    portalBaseStyle: {
+      stroke: true,
+      opacity: 1,
+      fill: true,
+      fillOpacity: 0.5,
+      interactive: true,
+    },
+    placeholderStyle: {
+      dashArray: '1,2',
+      weight: 1,
+    },
+    LEVEL_TO_WEIGHT: [2, 2, 2, 2, 2, 3, 3, 4, 4],
+    LEVEL_TO_RADIUS: [7, 7, 7, 7, 8, 8, 9, 10, 11],
+  };
+
+  /**
+   * Portal Manager for Mapbox.
+   * Manages a single GeoJSON source and layer for all portals.
+   * This is more efficient than creating individual markers.
+   *
+   * @class PortalManager
+   * @memberof IITC.map.layers.mapbox
+   */
+  function PortalManager(adapter) {
+    this._adapter = adapter;
+    this._sourceId = 'iitc-portals-source';
+    this._layerId = 'iitc-portals-layer';
+    this._outlineLayerId = 'iitc-portals-outline-layer';
+    this._portals = new Map(); // guid -> MapboxPortalMarker
+    this._features = new Map(); // guid -> GeoJSON feature
+    this._initialized = false;
+    this._selectedGuid = null;
+  }
+
+  /**
+   * Initialize the portal source and layers.
+   */
+  PortalManager.prototype.initialize = function () {
+    if (this._initialized) return;
+
+    var adapter = this._adapter;
+    var self = this;
+
+    // Add GeoJSON source for portals
+    adapter.addSource(this._sourceId, {
+      type: 'geojson',
+      data: {
+        type: 'FeatureCollection',
+        features: [],
+      },
+    });
+
+    // Add fill layer for portals
+    adapter.addMapboxLayer({
+      id: this._layerId,
+      type: 'circle',
+      source: this._sourceId,
+      paint: {
+        'circle-radius': ['get', 'radius'],
+        'circle-color': ['get', 'fillColor'],
+        'circle-opacity': ['get', 'fillOpacity'],
+        'circle-stroke-width': ['get', 'weight'],
+        'circle-stroke-color': ['get', 'color'],
+        'circle-stroke-opacity': ['get', 'opacity'],
+      },
+    });
+
+    // Set up click handler
+    var map = adapter.getNativeMap();
+    map.on('click', this._layerId, function (e) {
+      if (e.features && e.features.length > 0) {
+        var feature = e.features[0];
+        var guid = feature.properties.guid;
+        self._handlePortalClick(guid, e);
+      }
+    });
+
+    map.on('dblclick', this._layerId, function (e) {
+      if (e.features && e.features.length > 0) {
+        var feature = e.features[0];
+        var guid = feature.properties.guid;
+        self._handlePortalDblClick(guid, e);
+      }
+    });
+
+    map.on('contextmenu', this._layerId, function (e) {
+      if (e.features && e.features.length > 0) {
+        var feature = e.features[0];
+        var guid = feature.properties.guid;
+        self._handlePortalContextMenu(guid, e);
+      }
+    });
+
+    // Change cursor on hover
+    map.on('mouseenter', this._layerId, function () {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+
+    map.on('mouseleave', this._layerId, function () {
+      map.getCanvas().style.cursor = '';
+    });
+
+    this._initialized = true;
+  };
+
+  /**
+   * Handle portal click event.
+   * @private
+   */
+  PortalManager.prototype._handlePortalClick = function (guid, e) {
+    window.selectPortal(guid, 'click');
+    window.renderPortalDetails(guid);
+    e.originalEvent.stopPropagation();
+  };
+
+  /**
+   * Handle portal double-click event.
+   * @private
+   */
+  PortalManager.prototype._handlePortalDblClick = function (guid, e) {
+    window.selectPortal(guid, 'dblclick');
+    window.renderPortalDetails(guid);
+    var marker = this._portals.get(guid);
+    if (marker) {
+      window.map.setView(marker.getLatLng(), window.DEFAULT_ZOOM);
+    }
+    e.originalEvent.stopPropagation();
+  };
+
+  /**
+   * Handle portal context menu event.
+   * @private
+   */
+  PortalManager.prototype._handlePortalContextMenu = function (guid, e) {
+    window.selectPortal(guid, 'contextmenu');
+    window.renderPortalDetails(guid);
+    if (window.isSmartphone()) {
+      window.show('info');
+    } else if (!$('#scrollwrapper').is(':visible')) {
+      $('#sidebartoggle').click();
+    }
+    e.originalEvent.stopPropagation();
+  };
+
+  /**
+   * Add a portal marker.
+   * @param {MapboxPortalMarker} marker
+   */
+  PortalManager.prototype.addPortal = function (marker) {
+    this.initialize();
+
+    var guid = marker.options.guid;
+    this._portals.set(guid, marker);
+    this._features.set(guid, marker.toGeoJSON());
+    this._updateSource();
+  };
+
+  /**
+   * Remove a portal marker.
+   * @param {string} guid
+   */
+  PortalManager.prototype.removePortal = function (guid) {
+    this._portals.delete(guid);
+    this._features.delete(guid);
+    this._updateSource();
+  };
+
+  /**
+   * Update a portal's feature.
+   * @param {string} guid
+   */
+  PortalManager.prototype.updatePortal = function (guid) {
+    var marker = this._portals.get(guid);
+    if (marker) {
+      this._features.set(guid, marker.toGeoJSON());
+      this._updateSource();
+    }
+  };
+
+  /**
+   * Update the GeoJSON source with current features.
+   * @private
+   */
+  PortalManager.prototype._updateSource = function () {
+    var source = this._adapter.getSource(this._sourceId);
+    if (source) {
+      source.setData({
+        type: 'FeatureCollection',
+        features: Array.from(this._features.values()),
+      });
+    }
+  };
+
+  /**
+   * Set the selected portal.
+   * @param {string|null} guid
+   */
+  PortalManager.prototype.setSelected = function (guid) {
+    var previousGuid = this._selectedGuid;
+    this._selectedGuid = guid;
+
+    // Update previous and new selected markers
+    if (previousGuid && this._portals.has(previousGuid)) {
+      this._portals.get(previousGuid).setSelected(false);
+    }
+    if (guid && this._portals.has(guid)) {
+      this._portals.get(guid).setSelected(true);
+    }
+  };
+
+  /**
+   * Get a portal marker by GUID.
+   * @param {string} guid
+   * @returns {MapboxPortalMarker|undefined}
+   */
+  PortalManager.prototype.getPortal = function (guid) {
+    return this._portals.get(guid);
+  };
+
+  /**
+   * Check if a portal exists.
+   * @param {string} guid
+   * @returns {boolean}
+   */
+  PortalManager.prototype.hasPortal = function (guid) {
+    return this._portals.has(guid);
+  };
+
+  // Singleton instance
+  var _portalManager = null;
+
+  /**
+   * Get or create the portal manager singleton.
+   * @param {Object} adapter - The Mapbox adapter
+   * @returns {PortalManager}
+   */
+  function getPortalManager(adapter) {
+    if (!_portalManager) {
+      _portalManager = new PortalManager(adapter);
+    }
+    return _portalManager;
+  }
+
+  /**
+   * Mapbox Portal Marker class.
+   * Provides an API compatible with L.PortalMarker but uses the shared
+   * GeoJSON source for efficient rendering.
+   *
+   * @class MapboxPortalMarker
+   * @memberof IITC.map.layers.mapbox
+   */
+  function MapboxPortalMarker(latlng, data) {
+    this._latlng = this._normalizeLatLng(latlng);
+    this._details = null;
+    this._level = 0;
+    this._team = window.TEAM_NONE;
+    this._selected = data.guid === window.selectedPortal;
+    this._map = null;
+    this._visible = true;
+
+    this.options = {
+      guid: data.guid,
+    };
+
+    this.updateDetails(data);
+  }
+
+  MapboxPortalMarker.statics = PortalMarkerConstants;
+
+  /**
+   * Normalize latlng to {lat, lng} format.
+   * @private
+   */
+  MapboxPortalMarker.prototype._normalizeLatLng = function (latlng) {
+    if (Array.isArray(latlng)) {
+      return { lat: latlng[0], lng: latlng[1] };
+    }
+    return { lat: latlng.lat, lng: latlng.lng };
+  };
+
+  /**
+   * Add this marker to a map.
+   * @param {Object} map - Map adapter or native map
+   * @returns {this}
+   */
+  MapboxPortalMarker.prototype.addTo = function (map) {
+    // Get the adapter (map might be the adapter or the native map)
+    var adapter = map._adapter || map;
+    if (adapter.getRendererType && adapter.getRendererType() === 'mapbox') {
+      this._map = adapter;
+      var manager = getPortalManager(adapter);
+      manager.addPortal(this);
+    }
+    return this;
+  };
+
+  /**
+   * Remove this marker from the map.
+   * @returns {this}
+   */
+  MapboxPortalMarker.prototype.remove = function () {
+    if (this._map) {
+      var manager = getPortalManager(this._map);
+      manager.removePortal(this.options.guid);
+      this._map = null;
+    }
+    return this;
+  };
+
+  /**
+   * Check if the marker should be updated with new data.
+   * Same logic as L.PortalMarker.willUpdate
+   */
+  MapboxPortalMarker.prototype.willUpdate = function (details) {
+    if (details.level === undefined) {
+      return this._details.timestamp < details.timestamp && this._details.team !== details.team;
+    }
+    if (this._details.timestamp < details.timestamp) {
+      return true;
+    }
+    if (this.isPlaceholder() && this._details.team === details.team) {
+      return true;
+    }
+    if (this._details.timestamp > details.timestamp) {
+      return false;
+    }
+    if (details.history) {
+      if (!this._details.history) {
+        return true;
+      }
+      if (this._details.history._raw !== details.history._raw) {
+        return true;
+      }
+    }
+    if (!this._details.mods && details.mods) {
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * Update the marker with new portal details.
+   */
+  MapboxPortalMarker.prototype.updateDetails = function (details) {
+    // Same logic as L.PortalMarker.updateDetails
+    if (this._details) {
+      if (this._details.latE6 !== details.latE6 || this._details.lngE6 !== details.lngE6) {
+        this._latlng = { lat: details.latE6 / 1e6, lng: details.lngE6 / 1e6 };
+      }
+
+      if (details.level === undefined) {
+        if (this._details.timestamp < details.timestamp && this._details.team !== details.team) {
+          details.title = this._details.title;
+          details.image = this._details.image;
+          details.history = this._details.history;
+          this._details = details;
+        }
+      } else if (this._details.timestamp === details.timestamp) {
+        var localThis = this;
+        ['level', 'health', 'resCount', 'image', 'title', 'ornaments', 'mission', 'mission50plus', 'artifactBrief', 'mods', 'resonators', 'owner', 'artifactDetail'].forEach(function (
+          prop
+        ) {
+          if (details[prop]) localThis._details[prop] = details[prop];
+        });
+
+        if (details.history) {
+          if (!this._details.history) {
+            this._details.history = details.history;
+          } else {
+            this._details.history._raw |= details.history._raw;
+            ['visited', 'captured', 'scoutControlled'].forEach(function (prop) {
+              localThis._details.history[prop] ||= details.history[prop];
+            });
+          }
+        }
+        this._details.ent = details.ent;
+      } else {
+        if (!details.history) {
+          details.history = this._details.history;
+        }
+        this._details = details;
+      }
+    } else {
+      this._details = details;
+    }
+
+    this._level = parseInt(this._details.level) || 0;
+    this._team = IITC.utils.getTeamId(this._details.team);
+
+    if (this._team === window.TEAM_NONE) {
+      this._level = 0;
+    }
+
+    this.options = {
+      guid: this._details.guid,
+      level: this._level,
+      team: this._team,
+      ent: this._details.ent,
+      timestamp: this._details.timestamp,
+      data: this._details,
+    };
+
+    this.setSelected();
+
+    if (this.hasFullDetails()) {
+      window.portalDetail.store(this.options.guid, this._details);
+    }
+
+    // Update the feature in the manager
+    if (this._map) {
+      var manager = getPortalManager(this._map);
+      manager.updatePortal(this.options.guid);
+    }
+  };
+
+  /**
+   * Get portal details.
+   */
+  MapboxPortalMarker.prototype.getDetails = function () {
+    return this._details;
+  };
+
+  /**
+   * Check if this is a placeholder portal.
+   */
+  MapboxPortalMarker.prototype.isPlaceholder = function () {
+    return this._details.level === undefined;
+  };
+
+  /**
+   * Check if portal has full details.
+   */
+  MapboxPortalMarker.prototype.hasFullDetails = function () {
+    return !!this._details.mods;
+  };
+
+  /**
+   * Get the marker's lat/lng.
+   */
+  MapboxPortalMarker.prototype.getLatLng = function () {
+    return this._latlng;
+  };
+
+  /**
+   * Set the marker's lat/lng.
+   */
+  MapboxPortalMarker.prototype.setLatLng = function (latlng) {
+    this._latlng = this._normalizeLatLng(latlng);
+    if (this._map) {
+      var manager = getPortalManager(this._map);
+      manager.updatePortal(this.options.guid);
+    }
+    return this;
+  };
+
+  /**
+   * Set style (stub for highlighters).
+   */
+  MapboxPortalMarker.prototype.setStyle = function (style) {
+    Object.assign(this.options, style);
+    return this;
+  };
+
+  /**
+   * Set the marker style.
+   */
+  MapboxPortalMarker.prototype.setMarkerStyle = function (style) {
+    var styleOptions = Object.assign({}, this._style(), style);
+    Object.assign(this.options, styleOptions);
+
+    // Apply highlighter
+    var highlightStyle = window.highlightPortal(this);
+    if (highlightStyle) {
+      Object.assign(this.options, highlightStyle);
+    }
+
+    if (this._selected) {
+      this.options.color = window.COLOR_SELECTED_PORTAL;
+    }
+
+    if (this._map) {
+      var manager = getPortalManager(this._map);
+      manager.updatePortal(this.options.guid);
+    }
+
+    return this;
+  };
+
+  /**
+   * Set selection state.
+   */
+  MapboxPortalMarker.prototype.setSelected = function (selected) {
+    if (selected === false) {
+      this._selected = false;
+    } else {
+      this._selected = this._selected || selected;
+    }
+    this.setMarkerStyle();
+  };
+
+  /**
+   * Calculate style based on portal state.
+   * @private
+   */
+  MapboxPortalMarker.prototype._style = function () {
+    return Object.assign({}, this._scale(), PortalMarkerConstants.portalBaseStyle, {
+      color: window.COLORS[this._team],
+      fillColor: window.COLORS[this._team],
+    });
+  };
+
+  /**
+   * Calculate scale based on zoom level.
+   * @private
+   */
+  MapboxPortalMarker.prototype._scale = function () {
+    var scale = window.portalMarkerScale();
+    var level = Math.floor(this._level || 0);
+
+    var lvlWeight = PortalMarkerConstants.LEVEL_TO_WEIGHT[level] * Math.sqrt(scale);
+    var lvlRadius = PortalMarkerConstants.LEVEL_TO_RADIUS[level] * scale;
+
+    if (this.isPlaceholder()) {
+      lvlWeight = PortalMarkerConstants.placeholderStyle.weight;
+    }
+
+    return {
+      radius: lvlRadius,
+      weight: lvlWeight,
+    };
+  };
+
+  /**
+   * Bring marker to front (no-op for Mapbox, layers handle z-order).
+   */
+  MapboxPortalMarker.prototype.bringToFront = function () {
+    return this;
+  };
+
+  /**
+   * Bring marker to back (no-op for Mapbox).
+   */
+  MapboxPortalMarker.prototype.bringToBack = function () {
+    return this;
+  };
+
+  /**
+   * Convert to GeoJSON feature.
+   */
+  MapboxPortalMarker.prototype.toGeoJSON = function () {
+    var style = this._style();
+    var scale = this._scale();
+
+    return {
+      type: 'Feature',
+      geometry: {
+        type: 'Point',
+        coordinates: [this._latlng.lng, this._latlng.lat],
+      },
+      properties: {
+        guid: this.options.guid,
+        level: this._level,
+        team: this._team,
+        radius: scale.radius,
+        weight: scale.weight,
+        color: this._selected ? window.COLOR_SELECTED_PORTAL : style.color,
+        fillColor: this.options.fillColor || style.fillColor,
+        opacity: this.options.opacity || style.opacity,
+        fillOpacity: this.options.fillOpacity || style.fillOpacity,
+        selected: this._selected,
+      },
+    };
+  };
+
+  /**
+   * Add event listener (compatibility stub).
+   */
+  MapboxPortalMarker.prototype.on = function () {
+    // Events are handled by the PortalManager
+    return this;
+  };
+
+  /**
+   * Remove event listener (compatibility stub).
+   */
+  MapboxPortalMarker.prototype.off = function () {
+    return this;
+  };
+
+  // Export
+  IITC.map.layers.mapbox.PortalMarker = MapboxPortalMarker;
+  IITC.map.layers.mapbox.PortalManager = PortalManager;
+  IITC.map.layers.mapbox.getPortalManager = getPortalManager;
+  IITC.map.layers.mapbox.PortalMarkerConstants = PortalMarkerConstants;
+})();
