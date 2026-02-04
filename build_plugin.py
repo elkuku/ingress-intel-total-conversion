@@ -129,8 +129,39 @@ var log = ulog('{.stem}');
 
 
 def bundle_code(_, path=None):
-    files = (path / 'code').glob('*.js')
-    return '\n'.join(map(wrap_iife, sorted(files)))
+    code_path = path / 'code'
+
+    # Process files in specific order to handle dependencies:
+    # 1. First, process subdirectory modules in dependency order
+    # 2. Then, process root-level files alphabetically
+
+    result = []
+
+    # Process map/ subdirectory with explicit ordering for proper initialization
+    map_path = code_path / 'map'
+    if map_path.is_dir():
+        # Define the order for map module files
+        map_order = [
+            'interfaces.js',           # Defines IITC.map namespace and interfaces
+            'geo/geodesic-calc.js',    # Geodesic calculations (no dependencies)
+            'adapters/leaflet.js',     # Leaflet adapter
+            'layers/leaflet/portal-marker.js',  # Portal marker
+            'layers/leaflet/geodesic.js',       # Geodesic shapes wrapper
+            'layers/leaflet/factory.js',        # Layer factory
+            'compat/window-map-shim.js',        # Compatibility shim
+            'index.js',                # Main facade (depends on all above)
+        ]
+
+        for rel_file in map_order:
+            file_path = map_path / rel_file
+            if file_path.is_file():
+                result.append(wrap_iife(file_path))
+
+    # Process root-level files in code/ directory
+    root_files = sorted(f for f in code_path.glob('*.js') if f.is_file())
+    result.extend(map(wrap_iife, root_files))
+
+    return '\n'.join(result)
 
 
 def imgrepl(match, path=None):
