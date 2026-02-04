@@ -14,6 +14,57 @@
 const IITC = {};
 window.IITC = IITC;
 
+// Early Mapbox GL JS loading - must happen before code files are processed
+// Check if Mapbox renderer is selected and load the library synchronously
+(function loadMapboxGLEarly() {
+  const MAPBOX_VERSION = '3.3.0';
+  const MAPBOX_CSS = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.css`;
+  const MAPBOX_JS = `https://api.mapbox.com/mapbox-gl-js/v${MAPBOX_VERSION}/mapbox-gl.js`;
+
+  try {
+    const renderer = localStorage.getItem('iitc-renderer');
+
+    if (renderer === 'mapbox') {
+      // Load CSS synchronously via XHR and inject as style element
+      const cssXhr = new XMLHttpRequest();
+      cssXhr.open('GET', MAPBOX_CSS, false);
+      cssXhr.send();
+      if (cssXhr.status === 200) {
+        const style = document.createElement('style');
+        style.id = 'mapbox-gl-css';
+        style.textContent = cssXhr.responseText;
+        document.head.appendChild(style);
+      }
+
+      // Also add link element for Mapbox's CSS detection
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = MAPBOX_CSS;
+      document.head.appendChild(link);
+
+      // Load JS synchronously using XHR
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', MAPBOX_JS, false);
+      xhr.send();
+
+      if (xhr.status === 200) {
+        // Use indirect eval to execute in global scope
+        const globalEval = eval;
+        try {
+          globalEval(xhr.responseText);
+        } catch (evalError) {
+          // Fallback: try script element approach
+          const script = document.createElement('script');
+          script.textContent = xhr.responseText;
+          document.head.appendChild(script);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[IITC] Error loading Mapbox GL JS:', e);
+  }
+})();
+
 window.script_info = plugin_info;
 window.script_info.changelog = [
   {
