@@ -5,10 +5,24 @@
  * @module map
  */
 
+/**
+ * Earth radius in meters, matching the S2 geometry library.
+ * Used for Ingress-accurate distance calculations.
+ * @constant
+ * @type {number}
+ */
+var EARTH_RADIUS_METERS = 6367000.0;
+
+/**
+ * Set up the Coordinate Reference System for Leaflet.
+ * Uses S2 Earth radius for accurate Ingress distance calculations.
+ *
+ * @function setupCRS
+ * @private
+ */
 function setupCRS() {
   // use the earth radius value from s2 geometry library
   // https://github.com/google/s2-geometry-library-java/blob/c28f287b996c0cedc5516a0426fbd49f6c9611ec/src/com/google/common/geometry/S2LatLng.java#L31
-  var EARTH_RADIUS_METERS = 6367000.0;
   // distance calculations with that constant are a little closer to values observable in Ingress client.
   // difference is:
   // - ~0.06% when using LatLng.distanceTo() (R is 6371 vs 6367)
@@ -224,11 +238,15 @@ window.mapOptions = {
 };
 
 /**
- * Initializes the Leaflet map and configures various map layers and event listeners.
+ * Initializes the map and configures various map layers and event listeners.
  * This function is responsible for setting up the base map,
  * including the default basemap tiles (CartoDB, Default Ingress Map, Google Maps),
  * and configuring the map's properties such as center, zoom, bounds, and renderer options.
  * It also clears the 'Loading, please wait' message from the map container.
+ *
+ * The function uses the IITC.map abstraction layer which supports multiple renderers.
+ * By default, it uses Leaflet. Configure window.mapRendererConfig before calling
+ * this function to use a different renderer.
  *
  * Important functionalities:
  * - Adds dummy divs to Leaflet control areas to accommodate IITC UI elements.
@@ -244,24 +262,31 @@ window.setupMap = function () {
 
   $('#map').text(''); // clear 'Loading, please wait'
 
-  var map = L.map(
-    'map',
-    L.extend(
-      {
-        // proper initial position is now delayed until all plugins are loaded and the base layer is set
-        center: [0, 0],
-        zoom: 1,
-        crs: L.CRS.S2,
-        minZoom: window.MIN_ZOOM,
-        // zoomAnimation: false,
-        markerZoomAnimation: false,
-        bounceAtZoomLimits: false,
-        maxBoundsViscosity: 0.7,
-        worldCopyJump: true,
-      },
-      window.mapOptions
-    )
+  // Build map options, merging defaults with user options
+  var mapOptions = L.extend(
+    {
+      // proper initial position is now delayed until all plugins are loaded and the base layer is set
+      center: [0, 0],
+      zoom: 1,
+      crs: L.CRS.S2,
+      minZoom: window.MIN_ZOOM,
+      // zoomAnimation: false,
+      markerZoomAnimation: false,
+      bounceAtZoomLimits: false,
+      maxBoundsViscosity: 0.7,
+      worldCopyJump: true,
+    },
+    window.mapOptions
   );
+
+  // Initialize the map through the IITC.map facade
+  // This allows for future renderer switching (Leaflet, Mapbox, etc.)
+  var adapter = IITC.map.initialize('map', mapOptions);
+
+  // Get the native map instance for backward compatibility
+  // All existing code and plugins expect window.map to be an L.map
+  var map = adapter.getNativeMap();
+
   var max_lat = map.options.crs.projection.MAX_LATITUDE;
   map.setMaxBounds([
     [max_lat, 360],
@@ -330,7 +355,7 @@ window.setupMap = function () {
     const container = ev.positions.get(pos.BOTTOM_RIGHT);
     const attribution = container?.querySelector('span')?.textContent;
     if (attribution) {
-      this._attributionText = attribution; // Сохраняем текст атрибуции
+      this._attributionText = attribution;
       this._map.attributionControl.addAttribution(attribution);
     }
   };
@@ -342,7 +367,9 @@ window.setupMap = function () {
     }
   };
 
-  window.map = map;
+  // Set window.map for backward compatibility
+  // Uses the compatibility wrapper which adds IITC-specific methods
+  window.map = IITC.map.getCompatProxy();
 
   map.on('moveend', function () {
     var center = this.getCenter().wrap();
