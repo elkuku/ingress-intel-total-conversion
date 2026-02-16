@@ -162,6 +162,7 @@ def bundle_code(_, path=None):
             'layers/mapbox/factory.js',         # Layer factory
             # Compatibility and facade
             'compat/window-map-shim.js',        # Compatibility shim
+            'compat/deprecation.js',            # Deprecation warnings for L.* usage
             'index.js',                # Main facade (depends on all above)
         ]
 
