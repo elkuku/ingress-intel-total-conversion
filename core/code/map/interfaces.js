@@ -212,6 +212,27 @@ IITC.map.IMapRenderer = {
    */
   distance: function (latlng1, latlng2) {},
 
+  // ==================== Controls ====================
+
+  /**
+   * Add a control to the map.
+   * @function addControl
+   * @memberof IITC.map.IMapRenderer
+   * @param {Object} control - Control to add
+   * @param {string} [position] - Position override ('topleft', 'topright', 'bottomleft', 'bottomright')
+   * @returns {this}
+   */
+  addControl: function (control, position) {},
+
+  /**
+   * Remove a control from the map.
+   * @function removeControl
+   * @memberof IITC.map.IMapRenderer
+   * @param {Object} control - Control to remove
+   * @returns {this}
+   */
+  removeControl: function (control) {},
+
   // ==================== Layers ====================
 
   /**

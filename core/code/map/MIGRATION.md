@@ -183,6 +183,83 @@ All methods available on `IITC.map.factory`:
 
 ---
 
+## Controls (Buttons & UI Widgets)
+
+Controls are UI elements positioned in map corners — zoom buttons, scale bars, custom toolbars, etc. The `IITC.map` facade and `window.map` both support adding and removing controls across renderers.
+
+### Adding a Control
+
+```javascript
+// Via IITC.map facade (preferred)
+IITC.map.addControl(control);
+IITC.map.removeControl(control);
+
+// Via window.map (backward-compatible, works with both renderers)
+window.map.addControl(control);
+window.map.removeControl(control);
+```
+
+### Using Leaflet Controls (L.Control)
+
+Leaflet-style controls work with both renderers. When using Mapbox, the compatibility shim automatically positions the control's DOM element in the correct Mapbox corner container.
+
+```javascript
+// Create a custom Leaflet control
+var MyControl = L.Control.extend({
+  options: { position: 'topleft' },
+
+  onAdd: function (map) {
+    var container = L.DomUtil.create('div', 'my-plugin-control');
+    var button = L.DomUtil.create('button', '', container);
+    button.textContent = 'My Action';
+    button.addEventListener('click', function () {
+      // handle click
+    });
+    L.DomEvent.disableClickPropagation(container);
+    return container;
+  },
+
+  onRemove: function (map) {
+    // cleanup if needed
+  }
+});
+
+// Add it — works with both Leaflet and Mapbox renderers
+window.map.addControl(new MyControl());
+```
+
+### Control Positions
+
+Four corner positions are available (same names for both renderers):
+
+| Position | Location |
+|----------|----------|
+| `'topleft'` | Top-left corner |
+| `'topright'` | Top-right corner (default) |
+| `'bottomleft'` | Bottom-left corner |
+| `'bottomright'` | Bottom-right corner |
+
+```javascript
+// Specify position via control options
+var control = new MyControl({ position: 'bottomright' });
+window.map.addControl(control);
+
+// Or override position when adding
+window.map.addControl(control, 'bottomleft');
+```
+
+### How It Works Across Renderers
+
+- **Leaflet**: Controls use Leaflet's native `map.addControl()` which places them in `map._controlCorners`.
+- **Mapbox**: The compatibility shim creates `_controlCorners` mapped to Mapbox's built-in `.mapboxgl-ctrl-*` containers. When a Leaflet `L.Control` is added, its `onAdd()` is called and the returned DOM element is appended to the appropriate corner. Native Mapbox `IControl` objects are passed through to the Mapbox API directly.
+
+### What to Avoid
+
+- Don't access `map._controlCorners` directly for positioning — use `addControl` with a position instead.
+- Don't assume control containers have Leaflet-specific CSS classes when running on Mapbox.
+
+---
+
 ## Common Plugin Patterns
 
 ### Draw-Tools Style (overlay shapes)
@@ -303,4 +380,5 @@ if (IITC.map.getRendererType() === 'leaflet') {
 7. Replace `L.layerGroup()` → `IITC.map.factory.createLayerGroup()`
 8. Replace `L.featureGroup()` → `IITC.map.factory.createFeatureGroup()`
 9. Replace `latlng.distanceTo()` → `IITC.geo.distance()`
-10. Test with both renderers if possible
+10. Controls: Use `window.map.addControl()` or `IITC.map.addControl()` — both work across renderers
+11. Test with both renderers if possible

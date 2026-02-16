@@ -570,6 +570,29 @@ IITC.map.adapters = IITC.map.adapters || {};
     return 'iitc-layer-' + ++this._layerIdCounter;
   };
 
+  // ==================== Controls ====================
+
+  /**
+   * Add a control to the map.
+   * @param {Object} control
+   * @param {string} [position]
+   * @returns {this}
+   */
+  MapboxAdapter.prototype.addControl = function (control, position) {
+    this._map.addControl(control, position);
+    return this;
+  };
+
+  /**
+   * Remove a control from the map.
+   * @param {Object} control
+   * @returns {this}
+   */
+  MapboxAdapter.prototype.removeControl = function (control) {
+    this._map.removeControl(control);
+    return this;
+  };
+
   // ==================== Events ====================
 
   /**

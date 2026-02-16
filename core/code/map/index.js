@@ -314,6 +314,35 @@
     return IITC.geo.distance(latlng1, latlng2);
   };
 
+  // ==================== Control Methods ====================
+
+  /**
+   * Add a control to the map.
+   *
+   * @function addControl
+   * @memberof IITC.map
+   * @param {Object} control - Control to add
+   * @param {string} [position] - Position override
+   * @returns {Object} IITC.map for chaining
+   */
+  IITC.map.addControl = function (control, position) {
+    if (_adapter) _adapter.addControl(control, position);
+    return IITC.map;
+  };
+
+  /**
+   * Remove a control from the map.
+   *
+   * @function removeControl
+   * @memberof IITC.map
+   * @param {Object} control - Control to remove
+   * @returns {Object} IITC.map for chaining
+   */
+  IITC.map.removeControl = function (control) {
+    if (_adapter) _adapter.removeControl(control);
+    return IITC.map;
+  };
+
   // ==================== Layer Factory Shortcuts ====================
   // Convenience methods that delegate to the current factory
 

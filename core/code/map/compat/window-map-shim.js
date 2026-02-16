@@ -271,6 +271,71 @@ IITC.map.compat = IITC.map.compat || {};
       nativeMap.addEventListener = nativeMap.on;
       nativeMap.removeEventListener = nativeMap.off;
 
+      // Create _controlCorners mapping to Mapbox's native control containers
+      nativeMap._controlContainer = nativeMap.getContainer();
+      var container = nativeMap.getContainer();
+      var cornerSelectors = {
+        topleft: '.mapboxgl-ctrl-top-left',
+        topright: '.mapboxgl-ctrl-top-right',
+        bottomleft: '.mapboxgl-ctrl-bottom-left',
+        bottomright: '.mapboxgl-ctrl-bottom-right',
+      };
+      nativeMap._controlCorners = {};
+      for (var pos in cornerSelectors) {
+        var el = container.querySelector(cornerSelectors[pos]);
+        if (!el) {
+          el = document.createElement('div');
+          el.className = cornerSelectors[pos].slice(1); // remove leading dot
+          container.appendChild(el);
+        }
+        nativeMap._controlCorners[pos] = el;
+      }
+
+      // Wrap addControl/removeControl for Leaflet control compatibility
+      var originalAddControl = nativeMap.addControl ? nativeMap.addControl.bind(nativeMap) : null;
+      var originalRemoveControl = nativeMap.removeControl ? nativeMap.removeControl.bind(nativeMap) : null;
+
+      nativeMap.addControl = function (control, ctrlPosition) {
+        // If it's a Leaflet L.Control instance (has getPosition method)
+        if (control.getPosition) {
+          var ctrlPos = ctrlPosition || control.getPosition() || 'topright';
+          var corner = nativeMap._controlCorners[ctrlPos];
+          if (!corner) return nativeMap;
+
+          var ctrlContainer = control.onAdd(nativeMap);
+          corner.appendChild(ctrlContainer);
+
+          control._map = nativeMap;
+          control._container = ctrlContainer;
+          return nativeMap;
+        }
+
+        // Native Mapbox control — pass through
+        if (originalAddControl) {
+          return originalAddControl(control, ctrlPosition);
+        }
+        return nativeMap;
+      };
+
+      nativeMap.removeControl = function (control) {
+        if (control.getPosition && control._container) {
+          if (control.onRemove) {
+            control.onRemove(nativeMap);
+          }
+          if (control._container.parentNode) {
+            control._container.parentNode.removeChild(control._container);
+          }
+          control._map = null;
+          return nativeMap;
+        }
+
+        // Native Mapbox control
+        if (originalRemoveControl) {
+          return originalRemoveControl(control);
+        }
+        return nativeMap;
+      };
+
       // Track layers manually since Mapbox doesn't have hasLayer
       if (!nativeMap._iitcLayers) {
         nativeMap._iitcLayers = new Set();

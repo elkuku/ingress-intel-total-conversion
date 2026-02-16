@@ -283,6 +283,28 @@ IITC.map.adapters = IITC.map.adapters || {};
     return this;
   };
 
+  // ==================== Controls ====================
+
+  /**
+   * Add a control to the map.
+   * @param {Object} control
+   * @returns {this}
+   */
+  LeafletAdapter.prototype.addControl = function (control) {
+    this._map.addControl(control);
+    return this;
+  };
+
+  /**
+   * Remove a control from the map.
+   * @param {Object} control
+   * @returns {this}
+   */
+  LeafletAdapter.prototype.removeControl = function (control) {
+    this._map.removeControl(control);
+    return this;
+  };
+
   // ==================== Events ====================
 
   /**
