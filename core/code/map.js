@@ -232,6 +232,86 @@ function createDefaultOverlays() {
   /* eslint-enable dot-notation  */
 }
 
+/**
+ * Lightweight layer wrapper for Mapbox styles.
+ * Implements the minimal interface needed by LayerChooser (onAdd, onRemove, on, off, fire).
+ * When added to the map, calls setStyle() to switch the Mapbox base style.
+ *
+ * @constructor
+ * @param {string} styleUrl - Mapbox style URL (e.g. 'mapbox://styles/mapbox/dark-v11')
+ */
+function MapboxStyleLayer(styleUrl) {
+  this._styleUrl = styleUrl;
+  this._map = null;
+  this._events = {};
+  this.options = {};
+}
+
+MapboxStyleLayer.prototype.onAdd = function (map) {
+  this._map = map;
+  map.setStyle(this._styleUrl);
+  // After style loads, re-render map data (setStyle removes all sources/layers)
+  map.once('style.load', function () {
+    if (window.mapDataRequest) {
+      window.mapDataRequest.start();
+    }
+  });
+};
+
+MapboxStyleLayer.prototype.onRemove = function () {
+  // no-op: base layer removal is handled by switching to another style
+};
+
+MapboxStyleLayer.prototype.on = function (types, fn, context) {
+  var events = types.split(' ');
+  for (var i = 0; i < events.length; i++) {
+    var type = events[i];
+    if (!this._events[type]) this._events[type] = [];
+    this._events[type].push({ fn: fn, ctx: context });
+  }
+  return this;
+};
+
+MapboxStyleLayer.prototype.off = function (types, fn, context) {
+  var events = types.split(' ');
+  for (var i = 0; i < events.length; i++) {
+    var type = events[i];
+    if (!this._events[type]) continue;
+    this._events[type] = this._events[type].filter(function (listener) {
+      return listener.fn !== fn || listener.ctx !== context;
+    });
+  }
+  return this;
+};
+
+MapboxStyleLayer.prototype.fire = function (type, data) {
+  var listeners = this._events[type];
+  if (!listeners) return this;
+  var event = data || {};
+  event.type = type;
+  event.target = event.target || this;
+  for (var i = 0; i < listeners.length; i++) {
+    listeners[i].fn.call(listeners[i].ctx || this, event);
+  }
+  return this;
+};
+
+/**
+ * Creates Mapbox base map layers for use with the LayerChooser.
+ *
+ * @function createMapboxBaseMapLayers
+ * @returns {Object.<String, MapboxStyleLayer>} Named map style layers
+ */
+function createMapboxBaseMapLayers() {
+  return {
+    'Mapbox Dark': new MapboxStyleLayer('mapbox://styles/mapbox/dark-v11'),
+    'Mapbox Light': new MapboxStyleLayer('mapbox://styles/mapbox/light-v11'),
+    'Mapbox Streets': new MapboxStyleLayer('mapbox://styles/mapbox/streets-v12'),
+    'Mapbox Satellite': new MapboxStyleLayer('mapbox://styles/mapbox/satellite-v9'),
+    'Mapbox Satellite Streets': new MapboxStyleLayer('mapbox://styles/mapbox/satellite-streets-v12'),
+  };
+}
+
 // to be extended in app.js (or by plugins: `setup.priority = 'boot';`)
 window.mapOptions = {
   preferCanvas: 'PREFER_CANVAS' in window ? window.PREFER_CANVAS : true, // default is TRUE
@@ -300,9 +380,14 @@ window.setupMap = function () {
   // This allows for future renderer switching (Leaflet, Mapbox, etc.)
   var adapter = IITC.map.initialize('map', mapOptions);
 
-  // Get the native map instance for backward compatibility
-  // All existing code and plugins expect window.map to be an L.map
-  var map = adapter.getNativeMap();
+  // Get the map instance for backward compatibility
+  // For Leaflet: the native L.map; for Mapbox: compat-wrapped nativeMap
+  var map;
+  if (rendererType === 'mapbox') {
+    map = IITC.map.getCompatProxy();
+  } else {
+    map = adapter.getNativeMap();
+  }
   if (rendererType === 'leaflet') {
     var max_lat = map.options.crs.projection.MAX_LATITUDE;
     map.setMaxBounds([
@@ -338,51 +423,41 @@ window.setupMap = function () {
     ]);
   }
 
-  // Base layers and layer chooser are currently Leaflet-specific
-  var baseLayers = {};
-  var overlays = {};
+  // Overlays (FilterLayers) work via IITC.filters, not visual rendering — shared across renderers
+  var overlays = createDefaultOverlays();
+  var baseLayers;
   var layerChooser;
 
   if (rendererType === 'leaflet') {
     baseLayers = createDefaultBaseMapLayers();
-    overlays = createDefaultOverlays();
-
-    layerChooser = (window.layerChooser = new window.LayerChooser(baseLayers, overlays, { map: map }).addTo(map));
-
-    $.each(overlays, function (_, layer) {
-      if (map.hasLayer(layer)) {
-        return true;
-      } // continue
-
-      // as users often become confused if they accidentally switch a standard layer off, display a warning in this case
-      $('#portaldetails').html(
-        '<div class="layer_off_warning">' +
-          '<p><b>Warning</b>: some of the standard layers are turned off. Some portals/links/fields will not be visible.</p>' +
-          '<a id="enable_standard_layers">Enable standard layers</a>' +
-          '</div>'
-      );
-      $('#enable_standard_layers').on('click', function () {
-        $.each(overlays, function (ind, overlay) {
-          if (!map.hasLayer(overlay)) {
-            map.addLayer(overlay);
-          }
-        });
-        $('#portaldetails').html('');
-      });
-      return false; // break
-    });
   } else if (rendererType === 'mapbox') {
-    // TODO: Implement Mapbox-specific layer management
-    // For now, Mapbox uses the style set during initialization
-    // Create empty layer chooser to avoid errors
-    window.layerChooser = {
-      addBaseLayer: function() {},
-      addOverlay: function() {},
-      removeLayer: function() {},
-      getLayer: function() { return null; },
-      lastBaseLayerName: null
-    };
+    baseLayers = createMapboxBaseMapLayers();
   }
+
+  layerChooser = (window.layerChooser = new window.LayerChooser(baseLayers, overlays, { map: map }).addTo(map));
+
+  $.each(overlays, function (_, layer) {
+    if (map.hasLayer(layer)) {
+      return true;
+    } // continue
+
+    // as users often become confused if they accidentally switch a standard layer off, display a warning in this case
+    $('#portaldetails').html(
+      '<div class="layer_off_warning">' +
+        '<p><b>Warning</b>: some of the standard layers are turned off. Some portals/links/fields will not be visible.</p>' +
+        '<a id="enable_standard_layers">Enable standard layers</a>' +
+        '</div>'
+    );
+    $('#enable_standard_layers').on('click', function () {
+      $.each(overlays, function (ind, overlay) {
+        if (!map.hasLayer(overlay)) {
+          map.addLayer(overlay);
+        }
+      });
+      $('#portaldetails').html('');
+    });
+    return false; // break
+  });
 
   // Leaflet-specific attribution and Google Mutant setup
   if (rendererType === 'leaflet') {
@@ -488,8 +563,11 @@ window.setupMap = function () {
         map.setZoom(map.getZoom());
       });
     } else if (rendererType === 'mapbox') {
-      // Mapbox already has a base style set during initialization
-      // Just set the view position
+      // Restore saved base layer or use default
+      var storedMapbox = layerChooser.lastBaseLayerName ? layerChooser.getLayer(layerChooser.lastBaseLayerName) : null;
+      var defaultMapboxLayer = baseLayers['Mapbox Dark'];
+      map.addLayer(storedMapbox || defaultMapboxLayer);
+
       adapter.setView(pos.center, pos.zoom);
     }
 

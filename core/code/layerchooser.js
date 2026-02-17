@@ -271,7 +271,7 @@ var LayerChooser = L.Control.Layers.extend({
    *                   `persistent`, `default`, `labelEl`, `inputEl`, `statusTracking`.
    */
   layerInfo: function (layer) {
-    var fn = layer instanceof L.Layer ? this.__byLayer : layer instanceof HTMLElement ? this.__byLabelEl : this.__byName;
+    var fn = (typeof layer === 'object' && typeof layer.onAdd === 'function') ? this.__byLayer : layer instanceof HTMLElement ? this.__byLabelEl : this.__byName;
     return this._layers.find(fn, layer);
   },
 
