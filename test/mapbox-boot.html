@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IITC Mapbox Boot Test</title>
+  <style>
+    #map { width: 100%; height: 100vh; }
+  </style>
+</head>
+<body>
+<div id="map">Loading, please wait</div>
+<div id="portal_highlight_select"></div>
+<div id="portal_filter_select"></div>
+<div id="portaldetails"></div>
+<div id="sidebar" style="display:none">
+  <div id="playerstat"></div>
+  <div id="gamestat"></div>
+  <div id="artifactslist"></div>
+  <div id="game_stats"></div>
+  <div id="mobileinfo"></div>
+  <div id="updatestatus"></div>
+  <div id="scrollwrapper"><div id="chat"></div></div>
+  <div id="chatcontrols"></div>
+  <div id="chatinput"><input type="text" id="chattext"></div>
+  <div id="toolbox"></div>
+  <div id="search"><input type="text"></div>
+</div>
+
+<script>
+  // Stub the Niantic player info that IITC expects
+  window.PLAYER = { nickname: 'TestAgent', team: 'RESISTANCE', verified_level: 16 };
+  // Pre-fill niantic_params (extractFromStock checks for CURRENT_VERSION)
+  window.niantic_params = { CURRENT_VERSION: '2024-01-01-00-00' };
+  // Make extractFromStock non-writable so the wrapper can't override our no-op stub
+  Object.defineProperty(window, 'extractFromStock', {
+    value: function() {},
+    writable: false,
+    configurable: false
+  });
+  // Select mapbox renderer BEFORE IITC loads
+  localStorage.setItem('iitc-renderer', 'mapbox');
+  // Provide a dummy Mapbox token so IITC doesn't fall back to Leaflet
+  localStorage.setItem('iitc-renderer-mapbox-token', 'pk.test_dummy_token');
+</script>
+<script src="../build/local/total-conversion-build.user.js"></script>
+</body>
+</html>
