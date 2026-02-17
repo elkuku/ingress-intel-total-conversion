@@ -310,31 +310,38 @@ window.setPortalIndicators = function (p) {
   if (p) {
     var coord = p.getLatLng();
 
-    // range is only known for sure if we have portal details
-    // TODO? render a min range guess until details are loaded..?
+    try {
+      // range is only known for sure if we have portal details
+      // TODO? render a min range guess until details are loaded..?
 
-    var d = window.portalDetail.get(p.options.guid);
-    if (d) {
-      var range = window.getPortalRange(d);
-      window.portalRangeIndicator = (
-        range.range > 0
-          ? L.geodesicCircle(coord, range.range, {
-              fill: false,
-              color: window.RANGE_INDICATOR_COLOR,
-              weight: 3,
-              dashArray: range.isLinkable ? undefined : '10,10',
-              interactive: false,
-            })
-          : L.circle(coord, range.range, { fill: false, stroke: false, interactive: false })
-      ).addTo(window.map);
+      var d = window.portalDetail.get(p.options.guid);
+      if (d) {
+        var range = window.getPortalRange(d);
+        window.portalRangeIndicator = (
+          range.range > 0
+            ? L.geodesicCircle(coord, range.range, {
+                fill: false,
+                color: window.RANGE_INDICATOR_COLOR,
+                weight: 3,
+                dashArray: range.isLinkable ? undefined : '10,10',
+                interactive: false,
+              })
+            : L.circle(coord, range.range, { fill: false, stroke: false, interactive: false })
+        ).addTo(window.map);
+      }
+
+      window.portalAccessIndicator = L.circle(coord, window.HACK_RANGE, {
+        fill: false,
+        color: window.ACCESS_INDICATOR_COLOR,
+        weight: 2,
+        interactive: false,
+      }).addTo(window.map);
+    } catch (e) {
+      // Leaflet path objects (L.circle, L.geodesicCircle) require a Leaflet renderer
+      // which is not available when using non-Leaflet renderers (e.g. Mapbox).
+      // Indicators are non-essential — portal selection still works without them.
+      log.warn('Portal indicators not supported with current renderer:', e.message);
     }
-
-    window.portalAccessIndicator = L.circle(coord, window.HACK_RANGE, {
-      fill: false,
-      color: window.ACCESS_INDICATOR_COLOR,
-      weight: 2,
-      interactive: false,
-    }).addTo(window.map);
   }
 };
 

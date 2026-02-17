@@ -271,6 +271,18 @@ IITC.map.compat = IITC.map.compat || {};
       nativeMap.addEventListener = nativeMap.on;
       nativeMap.removeEventListener = nativeMap.off;
 
+      // Ensure Mapbox control containers are positioned correctly for Leaflet controls.
+      // Mapbox CSS may not be loaded (e.g. file:// protocol), so inject essential positioning.
+      var ctrlStyle = document.createElement('style');
+      ctrlStyle.textContent =
+        '.mapboxgl-control-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }' +
+        '.mapboxgl-ctrl-top-left, .mapboxgl-ctrl-top-right, .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right { position: absolute; pointer-events: auto; z-index: 2; }' +
+        '.mapboxgl-ctrl-top-left { top: 0; left: 0; }' +
+        '.mapboxgl-ctrl-top-right { top: 0; right: 0; }' +
+        '.mapboxgl-ctrl-bottom-left { bottom: 0; left: 0; }' +
+        '.mapboxgl-ctrl-bottom-right { bottom: 0; right: 0; }';
+      document.head.appendChild(ctrlStyle);
+
       // Create _controlCorners mapping to Mapbox's native control containers
       nativeMap._controlContainer = nativeMap.getContainer();
       var container = nativeMap.getContainer();
@@ -346,32 +358,38 @@ IITC.map.compat = IITC.map.compat || {};
 
       // Wrap addLayer to track layers
       // Use a flag to prevent recursion (addLayer -> addTo -> addLayer)
-      nativeMap._addingLayer = false;
       nativeMap.addLayer = function (layer, beforeId) {
-        if (layer && !nativeMap._addingLayer) {
-          // Check if this is a raw Mapbox layer definition (has id and type properties)
-          if (layer.id && layer.type && layer.source) {
-            // This is a Mapbox layer definition, use native addLayer
-            return originalAddLayer(layer, beforeId);
-          }
+        if (!layer) return nativeMap;
 
-          if (nativeMap._iitcLayers.has(layer)) {
-            return nativeMap; // Already added
-          }
-          nativeMap._iitcLayers.add(layer);
-          nativeMap._addingLayer = true;
-          try {
-            // If layer has _addToMap method (IITC/Mapbox layer objects), use it
-            if (typeof layer._addToMap === 'function') {
-              layer._addToMap(nativeMap);
-            } else if (typeof layer.addTo === 'function') {
-              // Leaflet-style layers use addTo
-              layer.addTo(nativeMap);
-            }
-          } finally {
-            nativeMap._addingLayer = false;
-          }
+        // Check if this is a raw Mapbox layer definition (has id and type properties)
+        if (layer.id && layer.type && layer.source) {
+          return originalAddLayer(layer, beforeId);
         }
+
+        if (nativeMap._iitcLayers.has(layer)) {
+          return nativeMap; // Already added
+        }
+        nativeMap._iitcLayers.add(layer);
+
+        // Call onAdd directly to avoid recursion (addTo calls map.addLayer)
+        if (typeof layer.onAdd === 'function') {
+          layer._map = nativeMap;
+          // Call beforeAdd if present (Leaflet uses this to set up renderers for Path objects)
+          if (typeof layer.beforeAdd === 'function') {
+            layer.beforeAdd(nativeMap);
+          }
+          layer.onAdd(nativeMap);
+        } else if (typeof layer._addToMap === 'function') {
+          layer._addToMap(nativeMap);
+        } else if (typeof layer.addTo === 'function') {
+          layer.addTo(nativeMap);
+        }
+
+        // Fire 'add' event so LayerChooser status tracking works
+        if (typeof layer.fire === 'function') {
+          layer.fire('add', { target: layer });
+        }
+
         return nativeMap;
       };
 
@@ -379,31 +397,34 @@ IITC.map.compat = IITC.map.compat || {};
       var originalRemoveLayer = nativeMap.removeLayer.bind(nativeMap);
 
       // Wrap removeLayer to track layers
-      nativeMap._removingLayer = false;
       nativeMap.removeLayer = function (layer) {
-        if (layer && !nativeMap._removingLayer) {
-          // Check if this is a layer ID string (for direct Mapbox layer removal)
-          if (typeof layer === 'string') {
-            // This is a Mapbox layer ID, use native removeLayer
-            return originalRemoveLayer(layer);
-          }
+        if (!layer) return nativeMap;
 
-          if (!nativeMap._iitcLayers.has(layer)) {
-            return nativeMap; // Not on map
-          }
-          nativeMap._iitcLayers.delete(layer);
-          nativeMap._removingLayer = true;
-          try {
-            // If layer has _removeFromMap method, use it
-            if (typeof layer._removeFromMap === 'function') {
-              layer._removeFromMap(nativeMap);
-            } else if (typeof layer.remove === 'function') {
-              layer.remove();
-            }
-          } finally {
-            nativeMap._removingLayer = false;
-          }
+        // Check if this is a layer ID string (for direct Mapbox layer removal)
+        if (typeof layer === 'string') {
+          return originalRemoveLayer(layer);
         }
+
+        if (!nativeMap._iitcLayers.has(layer)) {
+          return nativeMap; // Not on map
+        }
+        nativeMap._iitcLayers.delete(layer);
+
+        // Call onRemove directly to avoid recursion
+        if (typeof layer.onRemove === 'function') {
+          layer.onRemove(nativeMap);
+          layer._map = null;
+        } else if (typeof layer._removeFromMap === 'function') {
+          layer._removeFromMap(nativeMap);
+        } else if (typeof layer.remove === 'function') {
+          layer.remove();
+        }
+
+        // Fire 'remove' event so LayerChooser status tracking works
+        if (typeof layer.fire === 'function') {
+          layer.fire('remove', { target: layer });
+        }
+
         return nativeMap;
       };
 
@@ -418,6 +439,23 @@ IITC.map.compat = IITC.map.compat || {};
           fn.call(context || nativeMap, layer);
         });
         return nativeMap;
+      };
+
+      // Implement getPane for L.Layer compatibility
+      // Leaflet layers call this._map.getPane() in onAdd
+      nativeMap.getPane = function () {
+        return nativeMap.getContainer();
+      };
+
+      // Implement containerPointToLayerPoint for L.Layer._update compatibility
+      // In Mapbox there's no separate layer point offset, so identity transform
+      nativeMap.containerPointToLayerPoint = function (point) {
+        return point;
+      };
+
+      // Implement layerPointToContainerPoint (inverse of above)
+      nativeMap.layerPointToContainerPoint = function (point) {
+        return point;
       };
 
       // Helper to create Leaflet-compatible Point objects
@@ -510,6 +548,12 @@ IITC.map.compat = IITC.map.compat || {};
             return { lat: this.lat, lng: wrappedLng };
           }
         };
+      };
+
+      // Implement getSize (Leaflet API) — returns container dimensions as {x, y}
+      nativeMap.getSize = function () {
+        var containerEl = nativeMap.getContainer();
+        return createCompatPoint(containerEl.offsetWidth, containerEl.offsetHeight);
       };
 
       // Wrap getBounds to return Leaflet-compatible LatLngBounds
