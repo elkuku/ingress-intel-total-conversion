@@ -158,18 +158,23 @@ IITC.map.adapters = IITC.map.adapters || {};
       self._processPendingOperations();
     });
 
-    // Snap to integer zoom levels after zooming to match Leaflet behavior
-    this._snappingZoom = false;
-    this._map.on('zoomend', function () {
-      if (self._snappingZoom) return;
-      var currentZoom = self._map.getZoom();
-      var targetZoom = Math.round(currentZoom);
-      if (Math.abs(currentZoom - targetZoom) > 0.01) {
-        self._snappingZoom = true;
-        self._map.zoomTo(targetZoom, { duration: 0 });
-        self._snappingZoom = false;
+    // Replace Mapbox's smooth scroll zoom with Leaflet-style integer steps.
+    // Mapbox scroll zoom creates fractional zoom levels that conflict with
+    // IITC's tile system which requires integer zoom levels.
+    this._map.scrollZoom.disable();
+    this._map.getContainer().addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var delta = e.deltaY < 0 ? 1 : e.deltaY > 0 ? -1 : 0;
+      if (!delta) return;
+      var currentZoom = Math.round(self._map.getZoom());
+      var newZoom = currentZoom + delta;
+      var minZoom = self._map.getMinZoom();
+      var maxZoom = self._map.getMaxZoom();
+      newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+      if (newZoom !== currentZoom) {
+        self._map.zoomTo(newZoom, { duration: 200 });
       }
-    });
+    }, { passive: false });
 
     return this._map;
   };
@@ -194,8 +199,8 @@ IITC.map.adapters = IITC.map.adapters || {};
       attributionControl: true,
       // Prevent world copies to avoid panning issues
       renderWorldCopies: false,
-      // Use integer zoom levels like Leaflet
-      scrollZoom: true,
+      // Scroll zoom is disabled and replaced with a custom integer-step handler
+      scrollZoom: false,
     };
 
     // Convert center from [lat, lng] to [lng, lat]
@@ -286,7 +291,7 @@ IITC.map.adapters = IITC.map.adapters || {};
    * @returns {number}
    */
   MapboxAdapter.prototype.getZoom = function () {
-    return this._map.getZoom();
+    return Math.round(this._map.getZoom());
   };
 
   /**
