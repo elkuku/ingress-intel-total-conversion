@@ -271,35 +271,32 @@ IITC.map.compat = IITC.map.compat || {};
       nativeMap.addEventListener = nativeMap.on;
       nativeMap.removeEventListener = nativeMap.off;
 
-      // Ensure Mapbox control containers are positioned correctly for Leaflet controls.
-      // Mapbox CSS may not be loaded (e.g. file:// protocol), so inject essential positioning.
-      var ctrlStyle = document.createElement('style');
-      ctrlStyle.textContent =
-        '.mapboxgl-control-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }' +
-        '.mapboxgl-ctrl-top-left, .mapboxgl-ctrl-top-right, .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right { position: absolute; pointer-events: auto; z-index: 2; }' +
-        '.mapboxgl-ctrl-top-left { top: 0; left: 0; }' +
-        '.mapboxgl-ctrl-top-right { top: 0; right: 0; }' +
-        '.mapboxgl-ctrl-bottom-left { bottom: 0; left: 0; }' +
-        '.mapboxgl-ctrl-bottom-right { bottom: 0; right: 0; }';
-      document.head.appendChild(ctrlStyle);
-
-      // Create _controlCorners mapping to Mapbox's native control containers
+      // Create _controlCorners mapping to Mapbox's native control containers.
+      // Add Leaflet CSS classes so that existing IITC/Leaflet styles (z-index, positioning, grid)
+      // apply to the Mapbox corners — this keeps the layer chooser visible above the sidebar.
+      var controlContainer = nativeMap.getContainer().querySelector('.mapboxgl-control-container');
+      if (controlContainer) {
+        controlContainer.classList.add('leaflet-control-container');
+      }
       nativeMap._controlContainer = nativeMap.getContainer();
       var container = nativeMap.getContainer();
-      var cornerSelectors = {
-        topleft: '.mapboxgl-ctrl-top-left',
-        topright: '.mapboxgl-ctrl-top-right',
-        bottomleft: '.mapboxgl-ctrl-bottom-left',
-        bottomright: '.mapboxgl-ctrl-bottom-right',
+      var cornerMapping = {
+        topleft:     { mapbox: '.mapboxgl-ctrl-top-left',     leaflet: 'leaflet-top leaflet-left' },
+        topright:    { mapbox: '.mapboxgl-ctrl-top-right',    leaflet: 'leaflet-top leaflet-right' },
+        bottomleft:  { mapbox: '.mapboxgl-ctrl-bottom-left',  leaflet: 'leaflet-bottom leaflet-left' },
+        bottomright: { mapbox: '.mapboxgl-ctrl-bottom-right', leaflet: 'leaflet-bottom leaflet-right' },
       };
       nativeMap._controlCorners = {};
-      for (var pos in cornerSelectors) {
-        var el = container.querySelector(cornerSelectors[pos]);
+      for (var pos in cornerMapping) {
+        var mapping = cornerMapping[pos];
+        var el = container.querySelector(mapping.mapbox);
         if (!el) {
           el = document.createElement('div');
-          el.className = cornerSelectors[pos].slice(1); // remove leading dot
+          el.className = mapping.mapbox.slice(1); // remove leading dot
           container.appendChild(el);
         }
+        // Add Leaflet classes so IITC styles (z-index, grid layout, etc.) apply
+        el.className += ' ' + mapping.leaflet;
         nativeMap._controlCorners[pos] = el;
       }
 
