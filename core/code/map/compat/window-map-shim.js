@@ -376,10 +376,12 @@ IITC.map.compat = IITC.map.compat || {};
             layer.beforeAdd(nativeMap);
           }
           layer.onAdd(nativeMap);
+        } else if (typeof layer.addTo === 'function') {
+          // Prefer addTo over _addToMap — addTo contains adapter lookup
+          // and idempotency guards needed by Mapbox geodesic layers
+          layer.addTo(nativeMap);
         } else if (typeof layer._addToMap === 'function') {
           layer._addToMap(nativeMap);
-        } else if (typeof layer.addTo === 'function') {
-          layer.addTo(nativeMap);
         }
 
         // Fire 'add' event so LayerChooser status tracking works

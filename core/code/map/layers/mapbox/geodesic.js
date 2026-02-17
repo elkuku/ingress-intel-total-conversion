@@ -22,27 +22,28 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   function MapboxGeoJSONLayer() {
     this._map = null;
-    this._sourceId = null;
-    this._layerId = null;
     this._visible = true;
     this._eventListeners = new Map();
     this.options = {};
+
+    // Generate stable IDs once — reused across remove/addTo cycles
+    var baseId = 'iitc-layer-' + Math.random().toString(36).substr(2, 9);
+    this._sourceId = baseId + '-source';
+    this._layerId = baseId + '-layer';
   }
 
   /**
-   * Generate a unique ID for this layer.
-   * @private
-   */
-  MapboxGeoJSONLayer.prototype._generateId = function () {
-    return 'iitc-layer-' + Math.random().toString(36).substr(2, 9);
-  };
-
-  /**
-   * Add this layer to a map.
+   * Add this layer to a map. Idempotent — calling multiple times without
+   * remove() in between is a no-op. Uses stable IDs so remove/addTo cycles
+   * properly clean up and recreate the same Mapbox sources and layers.
+   *
    * @param {Object} map - Map adapter or native map
    * @returns {this}
    */
   MapboxGeoJSONLayer.prototype.addTo = function (map) {
+    // Already on a map — don't create duplicate Mapbox layers
+    if (this._map) return this;
+
     // Get the adapter - check multiple ways it might be available
     var adapter = null;
 
@@ -74,10 +75,6 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
     }
 
     this._map = adapter;
-    var baseId = this._generateId();
-    this._sourceId = baseId + '-source';
-    this._layerId = baseId + '-layer';
-
     this._addToMap();
     return this;
   };
@@ -93,26 +90,14 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
 
   /**
    * Remove this layer from the map.
+   * Uses adapter's deferred methods to ensure removal happens after any
+   * pending addSource/addMapboxLayer operations have completed.
    * @returns {this}
    */
   MapboxGeoJSONLayer.prototype.remove = function () {
     if (this._map) {
-      var nativeMap = this._map.getNativeMap();
-      try {
-        // Remove layer first, then source
-        try {
-          nativeMap.removeLayer(this._layerId);
-        } catch (e) {
-          // Layer might not exist
-        }
-        try {
-          nativeMap.removeSource(this._sourceId);
-        } catch (e) {
-          // Source might not exist or still has layers
-        }
-      } catch (e) {
-        console.warn('[Mapbox] Error removing layer:', e.message);
-      }
+      this._map.removeMapboxLayer(this._layerId);
+      this._map.removeSource(this._sourceId);
       this._map = null;
     }
     return this;
@@ -427,6 +412,10 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
   function MapboxGeodesicPolygon(latlngs, options) {
     MapboxGeoJSONLayer.call(this);
 
+    // Derive stable sub-layer IDs from the base _layerId
+    this._fillLayerId = this._layerId + '-fill';
+    this._strokeLayerId = this._layerId + '-stroke';
+
     this._latlngs = (latlngs || []).map(IITC.geo.normalizeLatLng);
     this._geodesicPath = [];
 
@@ -470,11 +459,8 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeodesicPolygon.prototype._addToMap = function () {
     var self = this;
-    var fillLayerId = this._layerId + '-fill';
-    var strokeLayerId = this._layerId + '-stroke';
-
-    this._fillLayerId = fillLayerId;
-    this._strokeLayerId = strokeLayerId;
+    var fillLayerId = this._fillLayerId;
+    var strokeLayerId = this._strokeLayerId;
 
     this._map.addSource(this._sourceId, {
       type: 'geojson',
@@ -492,17 +478,19 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
       },
     });
 
-    // Add stroke layer
-    this._map.addMapboxLayer({
-      id: strokeLayerId,
-      type: 'line',
-      source: this._sourceId,
-      paint: {
-        'line-color': this.options.color,
-        'line-width': this.options.weight,
-        'line-opacity': this.options.opacity,
-      },
-    });
+    // Add stroke layer (unless stroke is disabled, e.g. for fields)
+    if (this.options.stroke !== false) {
+      this._map.addMapboxLayer({
+        id: strokeLayerId,
+        type: 'line',
+        source: this._sourceId,
+        paint: {
+          'line-color': this.options.color,
+          'line-width': this.options.weight,
+          'line-opacity': this.options.opacity,
+        },
+      });
+    }
 
     // Set up click handlers
     var nativeMap = this._map.getNativeMap();
@@ -522,15 +510,9 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeodesicPolygon.prototype.remove = function () {
     if (this._map) {
-      var nativeMap = this._map.getNativeMap();
-      try {
-        // Remove layers first, then source
-        try { nativeMap.removeLayer(this._fillLayerId); } catch (e) { /* ignore */ }
-        try { nativeMap.removeLayer(this._strokeLayerId); } catch (e) { /* ignore */ }
-        try { nativeMap.removeSource(this._sourceId); } catch (e) { /* ignore */ }
-      } catch (e) {
-        console.warn('[Mapbox] Error removing polygon:', e.message);
-      }
+      this._map.removeMapboxLayer(this._fillLayerId);
+      this._map.removeMapboxLayer(this._strokeLayerId);
+      this._map.removeSource(this._sourceId);
       this._map = null;
     }
     return this;
@@ -616,6 +598,10 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
   function MapboxGeodesicCircle(latlng, radius, options) {
     MapboxGeoJSONLayer.call(this);
 
+    // Derive stable sub-layer IDs from the base _layerId
+    this._fillLayerId = this._layerId + '-fill';
+    this._strokeLayerId = this._layerId + '-stroke';
+
     this._latlng = IITC.geo.normalizeLatLng(latlng);
 
     // Handle radius as second argument or in options
@@ -662,11 +648,8 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeodesicCircle.prototype._addToMap = function () {
     var self = this;
-    var fillLayerId = this._layerId + '-fill';
-    var strokeLayerId = this._layerId + '-stroke';
-
-    this._fillLayerId = fillLayerId;
-    this._strokeLayerId = strokeLayerId;
+    var fillLayerId = this._fillLayerId;
+    var strokeLayerId = this._strokeLayerId;
 
     this._map.addSource(this._sourceId, {
       type: 'geojson',
@@ -714,15 +697,9 @@ IITC.map.layers.mapbox = IITC.map.layers.mapbox || {};
    */
   MapboxGeodesicCircle.prototype.remove = function () {
     if (this._map) {
-      var nativeMap = this._map.getNativeMap();
-      try {
-        // Remove layers first, then source
-        try { nativeMap.removeLayer(this._fillLayerId); } catch (e) { /* ignore */ }
-        try { nativeMap.removeLayer(this._strokeLayerId); } catch (e) { /* ignore */ }
-        try { nativeMap.removeSource(this._sourceId); } catch (e) { /* ignore */ }
-      } catch (e) {
-        console.warn('[Mapbox] Error removing circle:', e.message);
-      }
+      this._map.removeMapboxLayer(this._fillLayerId);
+      this._map.removeMapboxLayer(this._strokeLayerId);
+      this._map.removeSource(this._sourceId);
       this._map = null;
     }
     return this;
